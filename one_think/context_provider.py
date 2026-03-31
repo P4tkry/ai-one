@@ -124,6 +124,19 @@ class ContextPrompt:
             f"<<<END OF TOOL EXECUTION STDERR>>>"
         )
 
+    @staticmethod
+    def _contains_pipe(value: Any) -> bool:
+        if isinstance(value, str):
+            return "<pipe>" in value
+
+        if isinstance(value, dict):
+            return any(ContextPrompt._contains_pipe(v) for v in value.values())
+
+        if isinstance(value, list):
+            return any(ContextPrompt._contains_pipe(v) for v in value)
+
+        return False
+
     def _parse_model_response(self, answer: str) -> dict[str, Any]:
         try:
             parsed = json.loads(answer)
@@ -132,6 +145,13 @@ class ContextPrompt:
 
         if not isinstance(parsed, dict):
             raise ValueError("Model response must be a JSON object")
+
+        expected_top_level_keys = {"answer", "tools"}
+        actual_top_level_keys = set(parsed.keys())
+        if actual_top_level_keys != expected_top_level_keys:
+            raise ValueError(
+                f"Model response must contain exactly keys {expected_top_level_keys}, got {actual_top_level_keys}"
+            )
 
         if "answer" not in parsed:
             raise ValueError('Model response is missing required key: "answer"')
@@ -143,11 +163,12 @@ class ContextPrompt:
         if not isinstance(tools, dict):
             raise ValueError('Field "tools" must be an object')
 
-        if "is_pipeline" not in tools:
-            raise ValueError('Field "tools" must contain key: "is_pipeline"')
-
-        if "calls" not in tools:
-            raise ValueError('Field "tools" must contain key: "calls"')
+        expected_tools_keys = {"is_pipeline", "calls"}
+        actual_tools_keys = set(tools.keys())
+        if actual_tools_keys != expected_tools_keys:
+            raise ValueError(
+                f'Field "tools" must contain exactly keys {expected_tools_keys}, got {actual_tools_keys}'
+            )
 
         if not isinstance(tools["is_pipeline"], bool):
             raise ValueError('Field "tools.is_pipeline" must be a boolean')
@@ -155,9 +176,15 @@ class ContextPrompt:
         if not isinstance(tools["calls"], list):
             raise ValueError('Field "tools.calls" must be a list')
 
+        if not isinstance(parsed["answer"], str):
+            raise ValueError('Field "answer" must be a string')
+
         return parsed
 
     def _extract_tool_plan(self) -> None:
+        if self.response_dict is None:
+            raise ValueError("Cannot extract tool plan from empty response_dict")
+
         self.tools_intent = self.response_dict["tools"]
         self.response_answer = self.response_dict["answer"]
         self.is_pipeline = self.tools_intent["is_pipeline"]
@@ -194,18 +221,18 @@ class ContextPrompt:
         if not self.is_pipeline:
             for index, call in enumerate(self.tool_calls):
                 for param_name, value in call["params"].items():
-                    if value == "<pipe>":
+                    if self._contains_pipe(value):
                         raise ValueError(
                             f'Call at index {index} uses "<pipe>" in param "{param_name}" while is_pipeline is false'
                         )
             return
 
-        if self.is_pipeline and not self.tool_calls:
+        if not self.tool_calls:
             raise ValueError('If "is_pipeline" is true, "calls" must not be empty')
 
         for index, call in enumerate(self.tool_calls):
             params = call["params"]
-            contains_pipe = any(value == "<pipe>" for value in params.values())
+            contains_pipe = any(self._contains_pipe(value) for value in params.values())
 
             if index == 0 and contains_pipe:
                 raise ValueError('First pipeline call must not contain "<pipe>"')

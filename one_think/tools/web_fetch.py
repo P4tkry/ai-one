@@ -23,6 +23,7 @@ class WebFetch(Tool):
         "falling back to raw HTML when needed."
     )
 
+    # None = brak limitu, zwracaj całość
     DEFAULT_LENGTH = None
     DEFAULT_TIMEOUT = 10
 
@@ -39,12 +40,15 @@ class WebFetch(Tool):
         url = self._normalize_url(url)
 
         try:
-            length = int(arguments.get("length", self.DEFAULT_LENGTH))
+            length = arguments.get("length", self.DEFAULT_LENGTH)
             timeout = int(arguments.get("timeout", self.DEFAULT_TIMEOUT))
+
+            if length is not None:
+                length = int(length)
         except (TypeError, ValueError):
             return "", "'length' and 'timeout' must be integers"
 
-        if length <= 0:
+        if length is not None and length <= 0:
             return "", "'length' must be greater than 0"
         if timeout <= 0:
             return "", "'timeout' must be greater than 0"
@@ -77,12 +81,18 @@ class WebFetch(Tool):
                 readable_content = self._clean_text(readable_content)
 
                 if readable_content:
-                    return readable_content[:length], ""
+                    content_to_return = (
+                        readable_content[:length] if length is not None else readable_content
+                    )
+                    return content_to_return, ""
 
                 # Fallback: surowy HTML
                 html_fallback = self._clean_text(raw_text)
                 if html_fallback:
-                    return html_fallback[:length], ""
+                    content_to_return = (
+                        html_fallback[:length] if length is not None else html_fallback
+                    )
+                    return content_to_return, ""
 
                 return "", "No readable content found on the page"
 
@@ -90,7 +100,8 @@ class WebFetch(Tool):
             content = self._clean_text(raw_text)
             if not content:
                 return "", "No readable content found on the page"
-            content_to_return = content[:length] if length else content
+
+            content_to_return = content[:length] if length is not None else content
             return content_to_return, ""
 
         except requests.exceptions.Timeout:
@@ -111,7 +122,7 @@ class WebFetch(Tool):
             "Description: Fetches content from a web page.\n\n"
             "Usage:\n"
             "- url (str, required): target URL\n"
-            f"- length (int, optional): number of characters to return (default={self.DEFAULT_LENGTH})\n"
+            f"- length (int, optional): number of characters to return (default={self.DEFAULT_LENGTH}, None = full content)\n"
             f"- timeout (int, optional): request timeout in seconds (default={self.DEFAULT_TIMEOUT})\n"
             "- help (bool, optional): show this message\n\n"
             "Behavior:\n"
@@ -156,6 +167,7 @@ class WebFetch(Tool):
 
 if __name__ == "__main__":
     tool = WebFetch()
+
     result, error = tool.execute({
         "url": "https://pl.wikipedia.org/wiki/HMS_Roberts_(1915)"
     })
