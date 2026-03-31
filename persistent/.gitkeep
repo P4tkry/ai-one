@@ -1,0 +1,33 @@
+# Persistent Data Directory
+
+This directory contains persistent configuration and data files that are specific to your local installation.
+
+## Files stored here:
+
+- `SOUL.md` - System instructions and behavior guidelines
+- `USER.md` - User information and preferences
+- `MEMORY.md` - Important context the model should remember
+- `credentials.db` - Encrypted credentials database
+- `google_credentials.json` - Google Workspace OAuth credentials
+- `google_token.json` - Google Workspace access token
+- Other configuration files
+
+## Important Notes:
+
+⚠️ **This directory is ignored by git** (except this .gitkeep file)
+
+- Do NOT commit sensitive data from this directory
+- Backup important files separately
+- Each installation should have its own persistent/ directory
+
+## Configuration:
+
+File paths are configured in `.env`:
+```
+SOUL_PATH=persistent/SOUL.md
+USER_PATH=persistent/USER.md
+MEMORY_PATH=persistent/MEMORY.md
+CREDENTIALS_DB_PATH=persistent/credentials.db
+GOOGLE_CREDENTIALS_PATH=persistent/google_credentials.json
+GOOGLE_TOKEN_PATH=persistent/google_token.json
+```

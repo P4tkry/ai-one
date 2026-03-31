@@ -1,0 +1,34 @@
+# Environment variables - NEVER commit this file!
+.env
+
+# Credentials database - NEVER commit this file!
+credentials.db
+
+# User and system config files - local only
+SOUL.md
+USER.md
+
+# Google Workspace credentials - NEVER commit!
+google_credentials.json
+google_token.json
+
+# Persistent data directory - contains sensitive/local data
+persistent/*
+!persistent/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
