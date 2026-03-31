@@ -7,12 +7,7 @@ load_dotenv()
 
 class UserTool(Tool):
     name = "user"
-    description = "Manages the USER.md file - user information and preferences. Operations: read, write, append, clear, help."
-    arguments = {
-        "help": "bool (if true, returns detailed information about the tool)",
-        "operation": "string (operation to perform: 'read', 'write', 'append', 'clear', 'help')",
-        "content": "string (content to write or append, required for 'write' and 'append' operations)"
-    }
+    description = "Manages the USER.md file - user information and preferences."
     
     def __init__(self):
         super().__init__()

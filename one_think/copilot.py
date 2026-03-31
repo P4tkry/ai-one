@@ -1,8 +1,14 @@
 import subprocess
 import uuid
 
-def ask_question(prompt: str, model: str = 'gpt-4.1', session_id: str = None, catalog: str = None) -> tuple[
-    str | None, str]:
+
+def ask_question(
+    prompt: str,
+    model: str = 'gpt-4.1',
+    session_id: str = None,
+    catalog: str = None
+) -> tuple[str | None, str]:
+
     session_id = session_id or str(uuid.uuid4())
 
     command = [
@@ -12,10 +18,30 @@ def ask_question(prompt: str, model: str = 'gpt-4.1', session_id: str = None, ca
         "-sp", prompt
     ]
 
-    print(command)
+    print("COMMAND:", command)
 
-    output = subprocess.check_output(command, cwd=catalog)
-    return session_id, output.decode("utf-8").strip()
+    result = subprocess.run(
+        command,
+        cwd=catalog,
+        capture_output=True,
+        text=True,
+        encoding="utf-8"
+    )
+
+    # print("\n=== SUBPROCESS DEBUG ===")
+    # print("RETURN CODE:", result.returncode)
+    # print("STDOUT:\n", result.stdout)
+    # print("STDERR:\n", result.stderr)
+    # print("=== END DEBUG ===\n")
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"copilot failed (code {result.returncode})\n"
+            f"STDERR:\n{result.stderr}\n"
+            f"STDOUT:\n{result.stdout}"
+        )
+
+    return session_id, result.stdout.strip()
 
 # debug
 if __name__ == '__main__':

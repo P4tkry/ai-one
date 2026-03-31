@@ -4,9 +4,6 @@ from typing import Tuple
 class Tool:
     description = ""
     name = ""
-    arguments ={
-
-    }
     def __init__(self):
         pass
 
@@ -17,6 +14,6 @@ class Tool:
         pass
 
     def __str__(self):
-        return f'''Tool: {self.name} - {self.description} | Arguments: {self.arguments}'''
+        return f'''Tool: {self.name} - {self.description} | argument "help": true for more details'''
 
 

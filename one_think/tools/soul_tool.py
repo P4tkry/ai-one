@@ -7,12 +7,8 @@ load_dotenv()
 
 class SoulTool(Tool):
     name = "soul"
-    description = "Manages the SOUL.md file - system instructions and behavior guidelines. Operations: read, write, append, clear, help."
-    arguments = {
-        "help": "bool (if true, returns detailed information about the tool)",
-        "operation": "string (operation to perform: 'read', 'write', 'append', 'clear', 'help')",
-        "content": "string (content to write or append, required for 'write' and 'append' operations)"
-    }
+    description = "Manages the SOUL.md file - system instructions and behavior guidelines."
+
     
     def __init__(self):
         super().__init__()
