@@ -1,4 +1,5 @@
 from typing import Any
+import json
 
 from one_think.context_provider import ContextPrompt
 from one_think.tools import Tool
@@ -10,8 +11,8 @@ from one_think.tools.write_to_file import WriteToFile
 
 
 class ConversationContext:
-    MAX_LLM_PAYLOAD_CHARS = 20000
-    TOOL_OUTPUT_LIMIT_CHARS = 10000
+    MAX_LLM_PAYLOAD_CHARS = 15000  # Tool output limit - leaves space for system prompt (~15k) = ~30k total
+    TOOL_OUTPUT_LIMIT_CHARS = 15000  # Individual tool output limit
 
     def __init__(
         self,
@@ -26,41 +27,6 @@ class ConversationContext:
 
     def _find_tool(self, tool_name: str) -> Tool | None:
         return next((t for t in self.included_tools if t.name == tool_name), None)
-
-    @staticmethod
-    def _truncate_output(
-        stdout: str | None,
-        stderr: str | None,
-        limit: int = TOOL_OUTPUT_LIMIT_CHARS
-    ) -> tuple[str, str]:
-        stdout = "" if stdout is None else str(stdout)
-        stderr = "" if stderr is None else str(stderr)
-
-        stdout_truncated = False
-        stderr_truncated = False
-
-        if len(stdout) > limit:
-            stdout = stdout[:limit] + "\n---OUTPUT TRUNCATED---\n"
-            stdout_truncated = True
-
-        if len(stderr) > limit:
-            stderr = stderr[:limit] + "\n---OUTPUT TRUNCATED---\n"
-            stderr_truncated = True
-
-        stderr_prefix_parts: list[str] = []
-        if stdout_truncated:
-            stderr_prefix_parts.append(
-                f"STDOUT WAS TRUNCATED BECAUSE IT WAS LONGER THAN {limit} characters."
-            )
-        if stderr_truncated:
-            stderr_prefix_parts.append(
-                f"STDERR WAS TRUNCATED BECAUSE IT WAS LONGER THAN {limit} characters."
-            )
-
-        if stderr_prefix_parts:
-            stderr = "\n".join(stderr_prefix_parts) + ("\n" + stderr if stderr else "")
-
-        return stdout, stderr
 
     @staticmethod
     def _inject_pipe(value: Any, previous_output: str) -> Any:
@@ -121,8 +87,8 @@ class ConversationContext:
         if total_len <= cls.MAX_LLM_PAYLOAD_CHARS:
             return stdout, stderr
 
-        marker_stdout = "\n---STDOUT PAYLOAD TRUNCATED---\n"
-        marker_stderr = "\n---STDERR PAYLOAD TRUNCATED---\n"
+        marker_stdout = "\n---STDOUT PAYLOAD TRUNCATED--- (use python pypeline to analaze output)\n"
+        marker_stderr = "\n---STDERR PAYLOAD TRUNCATED--- (use python pypeline to analaze output)\n"
 
         # Preferuj stdout, ale zostaw trochę miejsca na stderr
         stderr_reserved = min(len(stderr), 4000)
@@ -147,19 +113,34 @@ class ConversationContext:
     def _execute_single_tool(self, tool_name: str, tool_params: dict[str, Any]) -> tuple[str, str]:
         tool = self._find_tool(tool_name)
         if not tool:
-            error_message = f'Tool "{tool_name}" not found in included tools.'
-            print(error_message)
-            return "", error_message
+            # Tool not found - return structured error
+            error_data = {
+                "status": "error",
+                "tool": tool_name,
+                "error_type": "ToolNotFound",
+                "error_message": f'Tool "{tool_name}" not found in included tools.',
+                "available_tools": [t.name for t in self.included_tools]
+            }
+            print(f"Tool not found: {tool_name}")
+            return "", json.dumps(error_data, indent=2)
 
         print(f"Executing tool: {tool_name} with arguments: {tool_params}")
 
         try:
             stdout, stderr = tool.execute(tool_params)
         except Exception as exc:
+            # Convert exception to structured error message for LLM
+            error_data = {
+                "status": "error",
+                "tool": tool_name,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "details": repr(exc)
+            }
             stdout = ""
-            stderr = f"Tool execution raised an exception: {type(exc).__name__}: {exc}"
+            stderr = json.dumps(error_data, indent=2)
+            print(f"Tool {tool_name} raised exception: {error_data}")
 
-        stdout, stderr = self._truncate_output(stdout, stderr)
         return stdout, stderr
 
     def _execute_non_pipeline_calls(self, calls: list[dict[str, Any]]) -> tuple[str, str]:
@@ -171,15 +152,26 @@ class ConversationContext:
             tool_params = call.get("params", {})
 
             if not isinstance(tool_name, str) or not tool_name.strip():
-                error_message = f'Invalid tool_name at call index {index}.'
-                print(error_message)
-                full_stderr += self._format_tool_block(f"INVALID_CALL_{index}", error_message)
+                error_data = {
+                    "status": "error",
+                    "call_index": index,
+                    "error_type": "InvalidToolName",
+                    "error_message": f'Invalid tool_name at call index {index}.'
+                }
+                print(f"Invalid tool_name at index {index}")
+                full_stderr += self._format_tool_block(f"INVALID_CALL_{index}", json.dumps(error_data, indent=2))
                 continue
 
             if not isinstance(tool_params, dict):
-                error_message = f'Invalid params for tool "{tool_name}" at call index {index}.'
-                print(error_message)
-                full_stderr += self._format_tool_block(tool_name, error_message)
+                error_data = {
+                    "status": "error",
+                    "call_index": index,
+                    "tool": tool_name,
+                    "error_type": "InvalidParams",
+                    "error_message": f'Invalid params for tool "{tool_name}" at call index {index}. Expected object, got {type(tool_params).__name__}.'
+                }
+                print(f"Invalid params at index {index}")
+                full_stderr += self._format_tool_block(tool_name, json.dumps(error_data, indent=2))
                 continue
 
             stdout, stderr = self._execute_single_tool(tool_name, tool_params)
@@ -199,15 +191,26 @@ class ConversationContext:
             tool_params = call.get("params", {})
 
             if not isinstance(tool_name, str) or not tool_name.strip():
-                error_message = f'Invalid tool_name at pipeline call index {index}.'
-                print(error_message)
-                full_stderr += self._format_tool_block(f"INVALID_CALL_{index}", error_message)
+                error_data = {
+                    "status": "error",
+                    "call_index": index,
+                    "error_type": "InvalidToolName",
+                    "error_message": f'Invalid tool_name at pipeline call index {index}.'
+                }
+                print(f"Invalid tool_name at pipeline index {index}")
+                full_stderr += self._format_tool_block(f"INVALID_CALL_{index}", json.dumps(error_data, indent=2))
                 break
 
             if not isinstance(tool_params, dict):
-                error_message = f'Invalid params for pipeline tool "{tool_name}" at call index {index}.'
-                print(error_message)
-                full_stderr += self._format_tool_block(tool_name, error_message)
+                error_data = {
+                    "status": "error",
+                    "call_index": index,
+                    "tool": tool_name,
+                    "error_type": "InvalidParams",
+                    "error_message": f'Invalid params for pipeline tool "{tool_name}" at call index {index}. Expected object, got {type(tool_params).__name__}.'
+                }
+                print(f"Invalid params at pipeline index {index}")
+                full_stderr += self._format_tool_block(tool_name, json.dumps(error_data, indent=2))
                 break
 
             if index == 0:
@@ -250,7 +253,6 @@ class ConversationContext:
 
         while prompt.tools_intent and prompt.tools_intent.get("calls"):
             full_stdout, full_stderr = self._execute_tool_calls_from_prompt(prompt)
-            full_stdout, full_stderr = self._truncate_llm_payload(full_stdout, full_stderr)
 
             prompt = ContextPrompt(
                 prompt=full_stdout,

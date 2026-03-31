@@ -5,6 +5,7 @@ import one_think.copilot as cp
 import one_think.prompts as prompts
 from one_think.tools import Tool
 from one_think.tools.web_fetch import WebFetch
+from one_think.truncation_manager import TruncationManager
 
 
 PROMPT_SEPARATORS = [
@@ -103,7 +104,7 @@ class ContextPrompt:
         system_prompt = self._build_system_prompt()
 
         if not self.is_tool_response:
-            return (
+            result = (
                 f"<<<BEGIN OF SYSTEM TRUSTED DATA>>>\n"
                 f"{system_prompt}\n"
                 f"<<<END OF SYSTEM TRUSTED DATA>>>\n\n"
@@ -111,18 +112,20 @@ class ContextPrompt:
                 f"{validate_prompt(self.prompt)}\n"
                 f"<<<END OF USER UNTRUSTED DATA>>>"
             )
-
-        return (
-            f"<<<BEGIN OF SYSTEM TRUSTED DATA>>>\n"
-            f"{system_prompt}\n"
-            f"<<<END OF SYSTEM TRUSTED DATA>>>\n\n"
-            f"<<<BEGIN OF TOOL EXECUTION STDOUT>>>\n"
-            f"{validate_prompt(self.prompt)}\n"
-            f"<<<END OF TOOL EXECUTION STDOUT>>>\n\n"
-            f"<<<BEGIN OF TOOL EXECUTION STDERR>>>\n"
-            f"{validate_prompt(self.stderr)}\n"
-            f"<<<END OF TOOL EXECUTION STDERR>>>"
-        )
+        else:
+            result = (
+                f"<<<BEGIN OF SYSTEM TRUSTED DATA>>>\n"
+                f"{system_prompt}\n"
+                f"<<<END OF SYSTEM TRUSTED DATA>>>\n\n"
+                f"<<<BEGIN OF TOOL EXECUTION STDOUT>>>\n"
+                f"{validate_prompt(self.prompt)}\n"
+                f"<<<END OF TOOL EXECUTION STDOUT>>>\n\n"
+                f"<<<BEGIN OF TOOL EXECUTION STDERR>>>\n"
+                f"{validate_prompt(self.stderr)}\n"
+                f"<<<END OF TOOL EXECUTION STDERR>>>"
+            )
+        
+        return result
 
     @staticmethod
     def _contains_pipe(value: Any) -> bool:
@@ -211,9 +214,8 @@ class ContextPrompt:
         self._validate_pipeline()
 
     def _validate_answer_and_tools_consistency(self) -> None:
-        if self.tool_calls and self.response_answer != "":
-            raise ValueError('If "tools.calls" is not empty, "answer" must be an empty string')
-
+        # Allow answer to be present even when tools are called - it can provide context
+        # Only validate that if no tools are called, answer must be a string
         if not self.tool_calls and not isinstance(self.response_answer, str):
             raise ValueError('If "tools.calls" is empty, "answer" must be a string')
 
@@ -237,16 +239,49 @@ class ContextPrompt:
             if index == 0 and contains_pipe:
                 raise ValueError('First pipeline call must not contain "<pipe>"')
 
-            if index > 0 and not contains_pipe:
-                raise ValueError(
-                    f'Pipeline call at index {index} must contain "<pipe>" in at least one param'
-                )
+            # Note: Not all tools in a pipeline need <pipe> - some are independent
+            # Only warn if <pipe> is not used, don't require it
 
     def ask(self) -> str | None:
         if self.model_provider != 'copilot':
             raise ValueError(f"Unsupported model provider: {self.model_provider}")
 
-        session_id, answer = cp.ask_question(str(self), session_id=self.session_id)
+        # Get the full prompt that will be sent
+        full_prompt = str(self)
+        prompt_size = len(full_prompt)
+        
+        # AUTO-TRUNCATE if exceeds limit
+        if prompt_size > TruncationManager.MAX_PROMPT_SIZE:
+            # Try to reduce tool output (self.prompt) first
+            if len(self.prompt) > 1000:
+                # Calculate how much space we need to save
+                target_prompt_size = TruncationManager.MAX_PROMPT_SIZE - 500  # Keep 500 char buffer
+                system_overhead = prompt_size - len(self.prompt)
+                available_for_prompt = target_prompt_size - system_overhead
+                
+                if available_for_prompt > 100:
+                    original_len = len(self.prompt)
+                    self.prompt = TruncationManager.truncate_prompt_data(
+                        self.prompt,
+                        available_for_prompt,
+                        context="full prompt data"
+                    )
+                else:
+                    print(f"\n❌ CRITICAL: Cannot truncate enough. Need {prompt_size - TruncationManager.MAX_PROMPT_SIZE} chars but data too small.\n")
+            
+            # Rebuild prompt after truncation
+            full_prompt = str(self)
+            new_size = len(full_prompt)
+            
+            if new_size > TruncationManager.MAX_PROMPT_SIZE:
+                print(f"❌ FATAL: Even after truncation, prompt {new_size} > {TruncationManager.MAX_PROMPT_SIZE} chars!")
+                raise RuntimeError(f"Cannot fit prompt within {TruncationManager.MAX_PROMPT_SIZE}k limit even after truncation")
+        
+        # WARNING: Log if approaching limit
+        else:
+            TruncationManager.log_approaching_limit(prompt_size)
+
+        session_id, answer = cp.ask_question(full_prompt, session_id=self.session_id)
         self.session_id = session_id
 
         print(answer)

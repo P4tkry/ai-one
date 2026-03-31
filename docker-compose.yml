@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  ai-one:
+    image: registry.p4tkry.pl/ai-one:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - registry.p4tkry.pl/ai-one:latest
+        - registry.p4tkry.pl/ai-one:${VERSION:-1.0}
+    
+    # Deploy configuration for Docker Swarm
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "com.ai-one.service=main"
+        - "com.ai-one.version=1.0"
+        
+        # Traefik configuration
+        - traefik.enable=true
+        - traefik.http.routers.ai-one.rule=Host(`ai-one.p4tkry.pl`)
+        - traefik.http.routers.ai-one.entrypoints=websecure
+        - traefik.http.routers.ai-one.tls.certresolver=le
+        - traefik.http.services.ai-one.loadbalancer.server.port=8000
+    
+    
+    # Environment variables from secrets
+    environment:
+      - CREDENTIALS_PASSWORD_FILE=/run/secrets/credentials_password
+      - SOUL_PATH=/app/persistent/SOUL.md
+      - USER_PATH=/app/persistent/USER.md
+      - MEMORY_PATH=/app/persistent/MEMORY.md
+      - CREDENTIALS_DB_PATH=/app/persistent/credentials.db
+      - GOOGLE_CREDENTIALS_PATH=/app/persistent/google_credentials.json
+      - GOOGLE_TOKEN_PATH=/app/persistent/google_token.json
+      - MESSENGER_PAGE_ACCESS_TOKEN_FILE=/run/secrets/messenger_token
+      - MESSENGER_PAGE_ID_FILE=/run/secrets/messenger_page_id
+    
+    # Secrets
+    secrets:
+      - credentials_password
+      - messenger_token
+      - messenger_page_id
+      - google_credentials
+    
+    # Volumes
+    volumes:
+      - persistent_data:/app/persistent
+      - app_logs:/app/logs
+    
+    # Networks
+    networks:
+      - traefik_proxy
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Secrets configuration
+secrets:
+  credentials_password:
+    external: true
+    name: ai-one_credentials_password
+  
+  messenger_token:
+    external: true
+    name: ai-one_messenger_token
+  
+  messenger_page_id:
+    external: true
+    name: ai-one_messenger_page_id
+  
+  google_credentials:
+    external: true
+    name: ai-one_google_credentials
+
+# Volumes
+volumes:
+  persistent_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/nfs/ai-one/persistent
+  
+  app_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/nfs/ai-one/logs
+
+# Networks
+networks:
+  traefik_proxy:
+    external: true
+    name: traefik_proxy
+
+# Docker registry credentials
+# Note: Use 'docker login registry.p4tkry.pl' before deployment
+# Or set in environment:
+# DOCKER_CONFIG_JSON=$(cat ~/.docker/config.json | base64)

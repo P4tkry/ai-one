@@ -13,9 +13,9 @@ def ask_question(
 
     command = [
         "copilot",
-        f"--resume={session_id}",
-        "--model", model,
-        "-sp", prompt
+        f'--resume={session_id}',
+        '--model', model,
+        '-sp', prompt
     ]
 
     print("COMMAND:", command)

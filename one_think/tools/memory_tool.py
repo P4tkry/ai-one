@@ -7,12 +7,7 @@ load_dotenv()
 
 class MemoryTool(Tool):
     name = "memory"
-    description = "Manages the MEMORY.md file - important information and context the model should remember. Operations: read, write, append, clear, help."
-    arguments = {
-        "help": "bool (if true, returns detailed information about the tool)",
-        "operation": "string (operation to perform: 'read', 'write', 'append', 'clear', 'help')",
-        "content": "string (content to write or append, required for 'write' and 'append' operations)"
-    }
+    description = "Manages the MEMORY.md file - important information and context the model should remember."
     
     def __init__(self):
         super().__init__()

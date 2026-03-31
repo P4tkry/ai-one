@@ -16,26 +16,15 @@ class PythonExecutorTool(Tool):
     - This tool is intended for trusted/local use.
     - It is NOT a secure sandbox.
     - By default, file execution is restricted to allowed directories.
-    - Direct code execution still allows arbitrary Python code.
+    - Optional "sandbox" mode adds best-effort isolation and resource limits.
     """
 
     name = "python_executor"
     description = "Execute Python code or Python script files"
 
-    arguments = {
-        "operation": "Operation to perform: execute, execute_file, help",
-        "code": "Python code to execute (required for 'execute')",
-        "file_path": "Path to Python file to execute (required for 'execute_file')",
-        "timeout": "Optional timeout in seconds (default: 30)",
-        "working_dir": "Optional working directory for execution",
-        "help": "Show help information (optional, boolean)",
-    }
-
     def __init__(self) -> None:
         super().__init__()
 
-        # Restrict execute_file to these directories.
-        # Adjust these to match your project layout.
         self.allowed_roots = [
             Path(".").resolve(),
             Path("./persistent").resolve(),
@@ -43,11 +32,17 @@ class PythonExecutorTool(Tool):
             Path("./tests").resolve(),
         ]
 
-        # Minimal environment passed to subprocess.
-        # Add variables here if your scripts need them.
         self.base_env = {
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUNBUFFERED": "1",
+        }
+
+        # Default resource limits for sandbox mode
+        self.sandbox_limits = {
+            "cpu_seconds": 2,
+            "memory_bytes": 256 * 1024 * 1024,   # 256 MB
+            "file_size_bytes": 10 * 1024 * 1024, # 10 MB
+            "nofile": 32,
         }
 
     def execute(self, arguments: dict[str, Any]) -> Tuple[str, str]:
@@ -64,16 +59,36 @@ class PythonExecutorTool(Tool):
 
         operation = operation.strip()
         timeout = self._parse_timeout(arguments.get("timeout"), default=30)
+        sandbox = self._to_bool(arguments.get("sandbox", False))
+        sandbox_network = self._to_bool(arguments.get("sandbox_network", False))
+        sandbox_readonly = self._to_bool(arguments.get("sandbox_readonly", True))
+        raw_output = self._to_bool(arguments.get("raw_output", False))
 
         if operation == "execute":
             code = arguments.get("code")
             working_dir = arguments.get("working_dir", ".")
-            return self._execute_code(code=code, timeout=timeout, working_dir=working_dir)
+            return self._execute_code(
+                code=code,
+                timeout=timeout,
+                working_dir=working_dir,
+                sandbox=sandbox,
+                sandbox_network=sandbox_network,
+                sandbox_readonly=sandbox_readonly,
+                raw_output=raw_output,
+            )
 
         if operation == "execute_file":
             file_path = arguments.get("file_path")
             working_dir = arguments.get("working_dir")
-            return self._execute_file(file_path=file_path, timeout=timeout, working_dir=working_dir)
+            return self._execute_file(
+                file_path=file_path,
+                timeout=timeout,
+                working_dir=working_dir,
+                sandbox=sandbox,
+                sandbox_network=sandbox_network,
+                sandbox_readonly=sandbox_readonly,
+                raw_output=raw_output,
+            )
 
         if operation == "help":
             return self._show_help()
@@ -90,7 +105,6 @@ class PythonExecutorTool(Tool):
         if timeout <= 0:
             return default
 
-        # Hard cap to avoid extremely long executions by mistake
         return min(timeout, 300)
 
     def _to_bool(self, value: Any) -> bool:
@@ -131,19 +145,42 @@ class PythonExecutorTool(Tool):
                 continue
         return False
 
-    def _build_env(self) -> dict[str, str]:
+    def _build_env(self, sandbox: bool = False, sandbox_network: bool = False) -> dict[str, str]:
         """
         Build environment for subprocess.
 
-        Intentionally restrictive. Extend if needed.
+        sandbox=False:
+            Minimal inherited environment.
+
+        sandbox=True:
+            Much more restrictive environment.
         """
         env: dict[str, str] = {}
 
-        # Keep a minimal PATH so Python can run dependencies if needed
+        if sandbox:
+            # Minimal environment in sandbox mode
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            env["PYTHONNOUSERSITE"] = "1"
+            env["HOME"] = tempfile.gettempdir()
+            env["TMP"] = tempfile.gettempdir()
+            env["TEMP"] = tempfile.gettempdir()
+
+            # Policy flag only; does NOT truly disable networking at OS level.
+            env["PY_EXECUTOR_SANDBOX"] = "1"
+            env["PY_EXECUTOR_NETWORK"] = "1" if sandbox_network else "0"
+
+            # Minimal PATH so sys.executable dependencies still work
+            if "PATH" in os.environ:
+                env["PATH"] = os.environ["PATH"]
+
+            return env
+
+        # Non-sandbox: lightly restricted env
         if "PATH" in os.environ:
             env["PATH"] = os.environ["PATH"]
 
-        # Keep common system settings if present
         for key in ("SYSTEMROOT", "WINDIR", "HOME", "USERPROFILE", "TMP", "TEMP"):
             if key in os.environ:
                 env[key] = os.environ[key]
@@ -157,12 +194,15 @@ class PythonExecutorTool(Tool):
         stderr: str,
         returncode: int,
         executed_label: str | None = None,
+        sandbox: bool = False,
     ) -> str:
         """Format subprocess output in a consistent way."""
         output: list[str] = []
 
         if executed_label:
             output.append(f"=== EXECUTED: {executed_label} ===")
+
+        output.append(f"=== SANDBOX MODE: {'ON' if sandbox else 'OFF'} ===")
 
         if stdout:
             output.append("=== STDOUT ===")
@@ -179,31 +219,92 @@ class PythonExecutorTool(Tool):
 
         return "\n".join(output)
 
+    def _build_python_cmd(self, target_path: Path, sandbox: bool) -> list[str]:
+        """
+        Build python invocation command.
+
+        In sandbox mode use isolated flags:
+        -I : isolated mode
+        -S : don't import site
+        -B : don't write .pyc
+        -E : ignore PYTHON* environment variables
+        """
+        if sandbox:
+            return [sys.executable, "-I", "-S", "-B", "-E", str(target_path)]
+        return [sys.executable, str(target_path)]
+
+    def _make_preexec_fn(self, sandbox: bool):
+        """
+        POSIX-only resource limiting hook.
+        Returns None on unsupported systems.
+        """
+        if not sandbox:
+            return None
+
+        if os.name != "posix":
+            return None
+
+        def _preexec():
+            import resource
+
+            limits = self.sandbox_limits
+
+            # CPU time
+            resource.setrlimit(resource.RLIMIT_CPU, (limits["cpu_seconds"], limits["cpu_seconds"]))
+
+            # Address space / memory
+            resource.setrlimit(resource.RLIMIT_AS, (limits["memory_bytes"], limits["memory_bytes"]))
+
+            # Max file size
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limits["file_size_bytes"], limits["file_size_bytes"]))
+
+            # Max open files
+            resource.setrlimit(resource.RLIMIT_NOFILE, (limits["nofile"], limits["nofile"]))
+
+            # No child processes
+            if hasattr(resource, "RLIMIT_NPROC"):
+                resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
+
+        return _preexec
+
     def _run_python_target(
         self,
         target_path: Path,
         timeout: int,
         working_dir: Path | None,
         executed_label: str | None = None,
+        sandbox: bool = False,
+        sandbox_network: bool = False,
+        raw_output: bool = False,
     ) -> Tuple[str, str]:
         """Run a Python file and collect output."""
         try:
             result = subprocess.run(
-                [sys.executable, str(target_path)],
+                self._build_python_cmd(target_path=target_path, sandbox=sandbox),
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 cwd=str(working_dir) if working_dir else None,
-                env=self._build_env(),
+                env=self._build_env(sandbox=sandbox, sandbox_network=sandbox_network),
+                preexec_fn=self._make_preexec_fn(sandbox),
             )
 
-            formatted = self._format_result(
-                stdout=result.stdout,
-                stderr=result.stderr,
-                returncode=result.returncode,
-                executed_label=executed_label,
-            )
-            return formatted, ""
+            if raw_output:
+                # Return raw output: stdout, then stderr if present
+                output = result.stdout
+                if result.stderr:
+                    output += result.stderr
+                return output, ""
+            else:
+                # Return formatted output (original behavior)
+                formatted = self._format_result(
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    returncode=result.returncode,
+                    executed_label=executed_label,
+                    sandbox=sandbox,
+                )
+                return formatted, ""
 
         except subprocess.TimeoutExpired:
             return "", f"Script execution timed out after {timeout} seconds"
@@ -219,6 +320,10 @@ class PythonExecutorTool(Tool):
         code: Any,
         timeout: int = 30,
         working_dir: Any = ".",
+        sandbox: bool = False,
+        sandbox_network: bool = False,
+        sandbox_readonly: bool = True,
+        raw_output: bool = False,
     ) -> Tuple[str, str]:
         """Execute Python code by writing it to a temporary file."""
         if not isinstance(code, str) or not code.strip():
@@ -229,27 +334,24 @@ class PythonExecutorTool(Tool):
             return "", wd_error
 
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".py",
-                delete=False,
-                encoding="utf-8",
-            ) as tmp_file:
-                tmp_file.write(code)
-                tmp_path = Path(tmp_file.name)
+            with tempfile.TemporaryDirectory(prefix="pyexec_") as tmp_dir:
+                tmp_root = Path(tmp_dir)
 
-            try:
+                # In sandbox_readonly mode use temp dir as cwd to reduce accidental writes
+                effective_wd = tmp_root if sandbox and sandbox_readonly else wd_path
+
+                tmp_path = tmp_root / "inline_exec.py"
+                tmp_path.write_text(code, encoding="utf-8")
+
                 return self._run_python_target(
                     target_path=tmp_path,
                     timeout=timeout,
-                    working_dir=wd_path,
+                    working_dir=effective_wd,
                     executed_label="<inline_code>",
+                    sandbox=sandbox,
+                    sandbox_network=sandbox_network,
+                    raw_output=raw_output,
                 )
-            finally:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
         except Exception as exc:
             return "", f"Error preparing code execution: {exc}"
@@ -259,6 +361,10 @@ class PythonExecutorTool(Tool):
         file_path: Any,
         timeout: int = 30,
         working_dir: Any = None,
+        sandbox: bool = False,
+        sandbox_network: bool = False,
+        sandbox_readonly: bool = True,
+        raw_output: bool = False,
     ) -> Tuple[str, str]:
         """Execute an existing Python file."""
         if not isinstance(file_path, str) or not file_path.strip():
@@ -289,12 +395,22 @@ class PythonExecutorTool(Tool):
         if wd_path is None:
             wd_path = script_path.parent
 
-        return self._run_python_target(
-            target_path=script_path,
-            timeout=timeout,
-            working_dir=wd_path,
-            executed_label=file_path,
-        )
+        try:
+            with tempfile.TemporaryDirectory(prefix="pyexec_") as tmp_dir:
+                tmp_root = Path(tmp_dir)
+                effective_wd = tmp_root if sandbox and sandbox_readonly else wd_path
+
+                return self._run_python_target(
+                    target_path=script_path,
+                    timeout=timeout,
+                    working_dir=effective_wd,
+                    executed_label=file_path,
+                    sandbox=sandbox,
+                    sandbox_network=sandbox_network,
+                    raw_output=raw_output,
+                )
+        except Exception as exc:
+            return "", f"Error preparing file execution: {exc}"
 
     def _show_help(self) -> Tuple[str, str]:
         """Show help information."""
@@ -305,7 +421,7 @@ DESCRIPTION:
 
 IMPORTANT:
     This tool is not a secure sandbox.
-    It is intended for trusted or local development use.
+    Sandbox mode is best-effort hardening only.
     File execution is restricted to allowed directories.
 
 ALLOWED DIRECTORIES:
@@ -337,21 +453,31 @@ PARAMETERS:
     working_dir (string, optional)
         Working directory for process execution
 
+    sandbox (boolean, optional)
+        Enable best-effort sandbox mode
+
+    sandbox_network (boolean, optional)
+        Allow network in sandbox mode. Default: false
+        NOTE: this is policy metadata only unless enforced externally.
+
+    sandbox_readonly (boolean, optional)
+        Use isolated temp working directory in sandbox mode. Default: true
+
 EXAMPLES:
     {{"operation": "execute", "code": "print('Hello World')"}}
 
     {{"operation": "execute",
-      "code": "for i in range(3):\\n    print(i)",
-      "timeout": 10}}
-
-    {{"operation": "execute_file", "file_path": "scripts/test.py"}}
+      "code": "print('safe-ish run')",
+      "sandbox": true}}
 
     {{"operation": "execute_file",
-      "file_path": "persistent/process_data.py",
-      "timeout": 60}}
+      "file_path": "scripts/test.py",
+      "sandbox": true,
+      "timeout": 5}}
 
 OUTPUT FORMAT:
     === EXECUTED: ... ===
+    === SANDBOX MODE: ON/OFF ===
     === STDOUT ===
     ...
     === STDERR ===
@@ -361,6 +487,6 @@ OUTPUT FORMAT:
 NOTES:
     - STDERR does not always mean failure.
     - Non-zero exit code usually indicates an error.
-    - Direct code execution can run arbitrary Python.
+    - Sandbox mode is not a full security boundary.
 """
         return help_text, ""

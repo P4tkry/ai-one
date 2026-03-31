@@ -22,22 +22,7 @@ except ImportError:
 
 class GoogleWorkspaceTool(Tool):
     name = "google_workspace"
-    description = "Manages Google Workspace services: Gmail, Calendar, Tasks. Operations: gmail_send, gmail_list, gmail_get, gmail_search, gmail_mark_read, calendar_list, calendar_create, tasks_list, tasks_create, help."
-    arguments = {
-        "help": "bool (if true, returns detailed information about the tool)",
-        "operation": "string (operation: 'gmail_send', 'gmail_list', 'gmail_get', 'gmail_search', 'gmail_mark_read', 'gmail_mark_unread', 'calendar_list', 'calendar_create', 'tasks_list', 'tasks_create', 'help')",
-        "message_id": "string (Gmail message ID, required for 'gmail_get', 'gmail_mark_read', 'gmail_mark_unread')",
-        "query": "string (search query for 'gmail_search', e.g., 'from:user@example.com')",
-        "to": "string (email recipient, required for 'gmail_send')",
-        "subject": "string (email subject, required for 'gmail_send')",
-        "body": "string (email body or task title)",
-        "summary": "string (calendar event summary)",
-        "start_time": "string (event start time ISO format, e.g., '2026-03-31T10:00:00')",
-        "end_time": "string (event end time ISO format)",
-        "max_results": "integer (max results to return, default: 10)",
-        "include_body": "bool (include email body in gmail_list, default: false)",
-        "task_list_id": "string (task list ID, default: '@default')"
-    }
+    description = "Manages Google Workspace services: Gmail, Calendar, Tasks."
     
     # Define scopes for Google APIs
     SCOPES = [

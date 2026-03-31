@@ -1,0 +1,44 @@
+version: '3.8'
+
+# Development Docker Compose (for local testing, not Swarm)
+services:
+  ai-one:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: ai-one-dev
+    
+    environment:
+      - CREDENTIALS_PASSWORD=${CREDENTIALS_PASSWORD}
+      - SOUL_PATH=/app/persistent/SOUL.md
+      - USER_PATH=/app/persistent/USER.md
+      - MEMORY_PATH=/app/persistent/MEMORY.md
+      - CREDENTIALS_DB_PATH=/app/persistent/credentials.db
+      - GOOGLE_CREDENTIALS_PATH=/app/persistent/google_credentials.json
+      - GOOGLE_TOKEN_PATH=/app/persistent/google_token.json
+      - MESSENGER_PAGE_ACCESS_TOKEN=${MESSENGER_PAGE_ACCESS_TOKEN}
+      - MESSENGER_PAGE_ID=${MESSENGER_PAGE_ID}
+    
+    volumes:
+      - ./persistent:/app/persistent
+      - ./logs:/app/logs
+      - .:/app  # Mount entire directory for development
+    
+    networks:
+      - ai-one-network
+    
+    restart: unless-stopped
+    
+    # Override CMD for interactive development
+    # command: tail -f /dev/null
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ai-one-network:
+    driver: bridge

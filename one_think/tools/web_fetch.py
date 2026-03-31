@@ -18,10 +18,7 @@ class WebFetch(Tool):
     """
 
     name: str = "web_fetch"
-    description: str = (
-        "Fetches content from a web page, prioritizing readable text and "
-        "falling back to raw HTML when needed."
-    )
+    description: str = "Fetches content from a web page."
 
     # None = brak limitu, zwracaj całość
     DEFAULT_LENGTH = None
@@ -73,6 +70,12 @@ class WebFetch(Tool):
             response.raise_for_status()
 
             content_type = response.headers.get("Content-Type", "").lower()
+            
+            # Reject binary/PDF files
+            binary_types = ["application/pdf", "application/octet-stream", "image/", "video/", "audio/"]
+            if any(bt in content_type for bt in binary_types):
+                return "", f"Cannot fetch binary content (Content-Type: {content_type})"
+            
             raw_text = response.text or ""
 
             if "text/html" in content_type:

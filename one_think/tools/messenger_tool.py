@@ -18,7 +18,11 @@ class MessengerTool(Tool):
     Supported operations:
     - send_message
     - list_conversations
+    - get_conversation
     - read_conversation
+    - get_message
+    - get_user_profile
+    - health
     - help
 
     Required environment variables:
@@ -31,31 +35,44 @@ class MessengerTool(Tool):
     """
 
     name = "messenger"
-    description = (
-        "Send and receive messages via Facebook Messenger. "
-        "Operations: send_message, list_conversations, read_conversation, help."
-    )
-    arguments = {
-        "operation": (
-            "Operation to perform: send_message, list_conversations, "
-            "read_conversation, help"
-        ),
-        "recipient_id": "Recipient PSID (Page-Scoped ID) for send_message",
-        "message": "Message text to send",
-        "conversation_id": "Conversation ID for read_conversation",
-        "limit": "Number of items to retrieve",
-        "after": "Pagination cursor for list_conversations or read_conversation",
-        "messaging_type": (
-            "Messaging type for send_message: RESPONSE, UPDATE, MESSAGE_TAG "
-            "(default: RESPONSE)"
-        ),
-        "tag": "Required when messaging_type=MESSAGE_TAG",
-        "help": "Show help information (optional, boolean)",
-    }
+    description = "Send and receive messages via Facebook Messenger. (use always when refer to messenger)"
 
     DEFAULT_LIST_LIMIT = 10
     DEFAULT_READ_LIMIT = 20
     MAX_LIMIT = 100
+    MAX_MESSAGE_DETAILS_LIMIT = 20
+
+    DEFAULT_CONVERSATION_FIELDS = [
+        "id",
+        "updated_time",
+    ]
+
+    DEFAULT_CONVERSATION_DETAILS_FIELDS = [
+        "id",
+        "updated_time",
+        "link",
+    ]
+
+    DEFAULT_MESSAGE_FIELDS = [
+        "id",
+        "created_time",
+        "from",
+        "to",
+        "message",
+        "sticker",
+        "attachments",
+    ]
+
+    DEFAULT_USER_PROFILE_FIELDS = [
+        "id",
+        "name",
+        "first_name",
+        "last_name",
+        "email",
+        "picture",
+    ]
+
+    ALLOWED_MESSAGING_TYPES = {"RESPONSE", "UPDATE", "MESSAGE_TAG"}
 
     def __init__(self) -> None:
         super().__init__()
@@ -71,75 +88,179 @@ class MessengerTool(Tool):
     # =========================
     # Public entrypoint
     # =========================
-    def execute(self, arguments: dict[str, str]) -> Tuple[str, str]:
+    def execute(self, arguments: dict[str, Any]) -> Tuple[str, str]:
         """
-        Execute the requested operation.
+        Execute requested operation.
 
         Returns:
-            Tuple[str, str] -> (result, error)
+            (result_json_or_text, error_text)
         """
         try:
             if self._is_truthy(arguments.get("help")):
                 return self._show_help()
 
-            operation = (arguments.get("operation") or "").strip()
-
-            if not operation:
+            operation = self._required_str(arguments, "operation", allow_empty=False)
+            if operation is None:
                 return "", "Missing required argument: 'operation'"
 
             if operation == "send_message":
-                recipient_id = (arguments.get("recipient_id") or "").strip()
-                message = (arguments.get("message") or "").strip()
-                messaging_type = (arguments.get("messaging_type") or "RESPONSE").strip().upper()
-                tag = (arguments.get("tag") or "").strip() or None
-
-                return self._send_message(
-                    recipient_id=recipient_id,
-                    message=message,
-                    messaging_type=messaging_type,
-                    tag=tag,
-                )
+                return self._op_send_message(arguments)
 
             if operation == "list_conversations":
-                limit, err = self._parse_limit(
-                    arguments.get("limit"),
-                    default=self.DEFAULT_LIST_LIMIT,
-                    max_value=self.MAX_LIMIT,
-                )
-                if err:
-                    return "", err
+                return self._op_list_conversations(arguments)
 
-                after = (arguments.get("after") or "").strip() or None
-                return self._list_conversations(limit=limit, after=after)
+            if operation == "get_conversation":
+                return self._op_get_conversation(arguments)
 
             if operation == "read_conversation":
-                conversation_id = (arguments.get("conversation_id") or "").strip()
-                limit, err = self._parse_limit(
-                    arguments.get("limit"),
-                    default=self.DEFAULT_READ_LIMIT,
-                    max_value=20,  # message details only for 20 most recent
-                )
-                if err:
-                    return "", err
+                return self._op_read_conversation(arguments)
 
-                after = (arguments.get("after") or "").strip() or None
-                return self._read_conversation(
-                    conversation_id=conversation_id,
-                    limit=limit,
-                    after=after,
-                )
+            if operation == "get_message":
+                return self._op_get_message(arguments)
+
+            if operation == "get_user_profile":
+                return self._op_get_user_profile(arguments)
+
+            if operation == "health":
+                return self._health_check()
 
             if operation == "help":
                 return self._show_help()
 
             return "", (
                 f"Unknown operation: '{operation}'. "
-                "Valid operations: send_message, list_conversations, "
-                "read_conversation, help"
+                "Valid operations: send_message, list_conversations, get_conversation, "
+                "read_conversation, get_message, get_user_profile, health, help"
             )
 
+        except ValueError as e:
+            return "", str(e)
         except Exception as e:
             return "", f"Unexpected error in execute(): {str(e)}"
+
+    # =========================
+    # Operation wrappers
+    # =========================
+    def _op_send_message(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        recipient_id = self._required_str(arguments, "recipient_id", allow_empty=False)
+        message = self._required_str(arguments, "message", allow_empty=False)
+        messaging_type = (arguments.get("messaging_type") or "RESPONSE").strip().upper()
+        tag = self._optional_str(arguments, "tag")
+
+        return self._send_message(
+            recipient_id=recipient_id,
+            message=message,
+            messaging_type=messaging_type,
+            tag=tag,
+        )
+
+    def _op_list_conversations(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        limit, err = self._parse_limit(
+            arguments.get("limit"),
+            default=self.DEFAULT_LIST_LIMIT,
+            max_value=self.MAX_LIMIT,
+        )
+        if err:
+            return "", err
+
+        after = self._optional_str(arguments, "after")
+        fields = self._parse_fields(
+            arguments.get("fields"),
+            default_fields=self.DEFAULT_CONVERSATION_FIELDS,
+        )
+
+        return self._list_conversations(limit=limit, after=after, fields=fields)
+
+    def _op_get_conversation(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        conversation_id = self._required_str(arguments, "conversation_id", allow_empty=False)
+        fields = self._parse_fields(
+            arguments.get("fields"),
+            default_fields=self.DEFAULT_CONVERSATION_DETAILS_FIELDS,
+        )
+
+        return self._get_conversation(conversation_id=conversation_id, fields=fields)
+
+    def _op_read_conversation(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        conversation_id = self._required_str(arguments, "conversation_id", allow_empty=False)
+
+        limit, err = self._parse_limit(
+            arguments.get("limit"),
+            default=self.DEFAULT_READ_LIMIT,
+            max_value=self.MAX_MESSAGE_DETAILS_LIMIT,
+        )
+        if err:
+            return "", err
+
+        after = self._optional_str(arguments, "after")
+        include_details = self._parse_bool(arguments.get("include_details"), default=True)
+
+        return self._read_conversation(
+            conversation_id=conversation_id,
+            limit=limit,
+            after=after,
+            include_details=include_details,
+        )
+
+    def _op_get_message(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        message_id = self._required_str(arguments, "message_id", allow_empty=False)
+        fields = self._parse_fields(
+            arguments.get("fields"),
+            default_fields=self.DEFAULT_MESSAGE_FIELDS,
+        )
+
+        data, error = self._get_message_details(message_id=message_id, fields=fields)
+        if error:
+            return "", f"Error getting message: {error}"
+
+        # Extract attachments for better display
+        attachments = self._extract_attachments(data)
+        
+        # Build result with flattened message structure
+        from_data = data.get("from", {}) or {}
+        to_data = (data.get("to", {}) or {}).get("data", [])
+        
+        result = {
+            "message_id": data.get("id", message_id),
+            "created_time": data.get("created_time"),
+            "from_name": from_data.get("name"),
+            "from_id": from_data.get("id"),
+            "message": data.get("message"),
+            "to": [
+                {
+                    "name": target.get("name"),
+                    "id": target.get("id"),
+                }
+                for target in to_data
+            ],
+            "requested_fields": fields,
+        }
+        
+        # Add extracted attachments if present
+        if attachments:
+            result["attachments"] = attachments
+        
+        # Add sticker if present
+        if data.get("sticker"):
+            result["sticker"] = data.get("sticker")
+        
+        return json.dumps(result, indent=2, ensure_ascii=False), ""
+
+    def _op_get_user_profile(self, arguments: Dict[str, Any]) -> Tuple[str, str]:
+        user_id = self._required_str(arguments, "user_id", allow_empty=False)
+        fields = self._parse_fields(
+            arguments.get("fields"),
+            default_fields=self.DEFAULT_USER_PROFILE_FIELDS,
+        )
+
+        data, error = self._get_user_profile(user_id=user_id, fields=fields)
+        if error:
+            return "", f"Error getting user profile: {error}"
+
+        result = {
+            "profile": data,
+            "requested_fields": fields,
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False), ""
 
     # =========================
     # Operations
@@ -151,19 +272,13 @@ class MessengerTool(Tool):
         messaging_type: str = "RESPONSE",
         tag: Optional[str] = None,
     ) -> Tuple[str, str]:
-        """
-        Send a text message to a user by PSID.
-        Current Messenger docs describe sending to /PAGE-ID/messages with
-        recipient and messaging_type.
-        """
         if not recipient_id:
             return "", "Missing required argument: recipient_id"
 
         if not message:
             return "", "Missing required argument: message"
 
-        allowed_messaging_types = {"RESPONSE", "UPDATE", "MESSAGE_TAG"}
-        if messaging_type not in allowed_messaging_types:
+        if messaging_type not in self.ALLOWED_MESSAGING_TYPES:
             return "", (
                 "Invalid messaging_type. Allowed values: "
                 "RESPONSE, UPDATE, MESSAGE_TAG"
@@ -203,19 +318,18 @@ class MessengerTool(Tool):
         self,
         limit: int = DEFAULT_LIST_LIMIT,
         after: Optional[str] = None,
+        fields: Optional[List[str]] = None,
     ) -> Tuple[str, str]:
-        """
-        Get conversation list for the page.
-
-        Conversations API requires:
-        GET /PAGE-ID/conversations?platform=messenger
-        """
         url = f"{self.base_url}/{self.page_id}/conversations"
 
         params: Dict[str, Any] = {
             "platform": "messenger",
             "limit": limit,
         }
+
+        if fields:
+            params["fields"] = ",".join(fields)
+
         if after:
             params["after"] = after
 
@@ -225,25 +339,35 @@ class MessengerTool(Tool):
 
         conversations = data.get("data", [])
         paging = data.get("paging", {}) if isinstance(data, dict) else {}
-        cursors = paging.get("cursors", {}) if isinstance(paging, dict) else {}
+        result = {
+            "count": len(conversations),
+            "conversations": conversations,
+            "requested_fields": fields or [],
+            "paging": self._normalize_paging(paging),
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False), ""
 
-        normalized = []
-        for conv in conversations:
-            normalized.append(
-                {
-                    "conversation_id": conv.get("id"),
-                    "updated_time": conv.get("updated_time"),
-                }
-            )
+    def _get_conversation(
+        self,
+        conversation_id: str,
+        fields: Optional[List[str]] = None,
+    ) -> Tuple[str, str]:
+        if not conversation_id:
+            return "", "Missing required argument: conversation_id"
+
+        url = f"{self.base_url}/{conversation_id}"
+        params = {}
+
+        if fields:
+            params["fields"] = ",".join(fields)
+
+        data, error = self._get(url, params=params)
+        if error:
+            return "", f"Error getting conversation: {error}"
 
         result = {
-            "count": len(normalized),
-            "conversations": normalized,
-            "paging": {
-                "next_cursor": cursors.get("after"),
-                "previous_cursor": cursors.get("before"),
-                "has_next_page": "next" in paging if isinstance(paging, dict) else False,
-            },
+            "conversation": data,
+            "requested_fields": fields or [],
         }
         return json.dumps(result, indent=2, ensure_ascii=False), ""
 
@@ -252,18 +376,8 @@ class MessengerTool(Tool):
         conversation_id: str,
         limit: int = DEFAULT_READ_LIMIT,
         after: Optional[str] = None,
+        include_details: bool = True,
     ) -> Tuple[str, str]:
-        """
-        Read messages from a conversation.
-
-        Step 1:
-            GET /CONVERSATION-ID?fields=messages.limit(N){id,created_time}
-
-        Step 2:
-            For each message ID, GET /MESSAGE-ID?fields=id,created_time,from,to,message
-
-        Meta notes that detailed info can only be queried for the 20 most recent messages.
-        """
         if not conversation_id:
             return "", "Missing required argument: conversation_id"
 
@@ -281,19 +395,31 @@ class MessengerTool(Tool):
                 "count": 0,
                 "messages": [],
                 "paging": paging_info,
+                "include_details": include_details,
+            }
+            return json.dumps(result, indent=2, ensure_ascii=False), ""
+
+        if not include_details:
+            result = {
+                "conversation_id": conversation_id,
+                "count": len(message_refs),
+                "messages": list(reversed(message_refs)),
+                "paging": paging_info,
+                "include_details": False,
             }
             return json.dumps(result, indent=2, ensure_ascii=False), ""
 
         detailed_messages: List[Dict[str, Any]] = []
         detail_errors: List[Dict[str, Any]] = []
 
-        # Conversation API returns most recent first.
-        # We reverse later so output is oldest-first.
         for ref in message_refs:
             message_id = ref.get("id")
             created_time = ref.get("created_time")
 
-            details, detail_error = self._get_message_details(message_id)
+            details, detail_error = self._get_message_details(
+                message_id,
+                fields=self.DEFAULT_MESSAGE_FIELDS,
+            )
             if detail_error:
                 detail_errors.append(
                     {
@@ -302,7 +428,6 @@ class MessengerTool(Tool):
                         "error": detail_error,
                     }
                 )
-                # Still keep basic info so caller sees something.
                 detailed_messages.append(
                     {
                         "message_id": message_id,
@@ -318,23 +443,32 @@ class MessengerTool(Tool):
 
             from_data = details.get("from", {}) or {}
             to_data = (details.get("to", {}) or {}).get("data", [])
+            attachments = self._extract_attachments(details)
 
-            detailed_messages.append(
-                {
-                    "message_id": details.get("id", message_id),
-                    "created_time": details.get("created_time", created_time),
-                    "from_name": from_data.get("name"),
-                    "from_id": from_data.get("id"),
-                    "message": details.get("message"),
-                    "to": [
-                        {
-                            "name": target.get("name"),
-                            "id": target.get("id"),
-                        }
-                        for target in to_data
-                    ],
-                }
-            )
+            message_obj = {
+                "message_id": details.get("id", message_id),
+                "created_time": details.get("created_time", created_time),
+                "from_name": from_data.get("name"),
+                "from_id": from_data.get("id"),
+                "message": details.get("message"),
+                "to": [
+                    {
+                        "name": target.get("name"),
+                        "id": target.get("id"),
+                    }
+                    for target in to_data
+                ],
+            }
+            
+            # Add attachments if present
+            if attachments:
+                message_obj["attachments"] = attachments
+            
+            # Add sticker if present
+            if details.get("sticker"):
+                message_obj["sticker"] = details.get("sticker")
+            
+            detailed_messages.append(message_obj)
 
         detailed_messages.reverse()
 
@@ -344,21 +478,16 @@ class MessengerTool(Tool):
             "messages": detailed_messages,
             "paging": paging_info,
             "detail_errors": detail_errors,
+            "include_details": True,
         }
         return json.dumps(result, indent=2, ensure_ascii=False), ""
 
-    # =========================
-    # Conversation readers
-    # =========================
     def _get_conversation_message_refs(
         self,
         conversation_id: str,
         limit: int,
         after: Optional[str],
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str]:
-        """
-        Get message IDs and created_time from a conversation.
-        """
         url = f"{self.base_url}/{conversation_id}"
         params: Dict[str, Any] = {
             "fields": f"messages.limit({limit}){{id,created_time}}"
@@ -373,26 +502,20 @@ class MessengerTool(Tool):
         messages_obj = data.get("messages", {}) if isinstance(data, dict) else {}
         message_refs = messages_obj.get("data", []) if isinstance(messages_obj, dict) else []
         paging = messages_obj.get("paging", {}) if isinstance(messages_obj, dict) else {}
-        cursors = paging.get("cursors", {}) if isinstance(paging, dict) else {}
 
-        paging_info = {
-            "next_cursor": cursors.get("after"),
-            "previous_cursor": cursors.get("before"),
-            "has_next_page": "next" in paging if isinstance(paging, dict) else False,
-        }
+        return message_refs, self._normalize_paging(paging), ""
 
-        return message_refs, paging_info, ""
-
-    def _get_message_details(self, message_id: Optional[str]) -> Tuple[Dict[str, Any], str]:
-        """
-        Get detailed fields for a single message.
-        """
+    def _get_message_details(
+        self,
+        message_id: Optional[str],
+        fields: Optional[List[str]] = None,
+    ) -> Tuple[Dict[str, Any], str]:
         if not message_id:
             return {}, "Missing message ID"
 
         url = f"{self.base_url}/{message_id}"
         params = {
-            "fields": "id,created_time,from,to,message"
+            "fields": ",".join(fields or self.DEFAULT_MESSAGE_FIELDS)
         }
 
         data, error = self._get(url, params=params)
@@ -400,6 +523,44 @@ class MessengerTool(Tool):
             return {}, error
 
         return data, ""
+
+    def _get_user_profile(
+        self,
+        user_id: str,
+        fields: Optional[List[str]] = None,
+    ) -> Tuple[Dict[str, Any], str]:
+        if not user_id:
+            return {}, "Missing user_id"
+
+        url = f"{self.base_url}/{user_id}"
+        params = {
+            "fields": ",".join(fields or self.DEFAULT_USER_PROFILE_FIELDS)
+        }
+
+        data, error = self._get(url, params=params)
+        if error:
+            return {}, error
+
+        return data, ""
+
+    def _health_check(self) -> Tuple[str, str]:
+        url = f"{self.base_url}/{self.page_id}"
+        params = {
+            "fields": "id"
+        }
+
+        data, error = self._get(url, params=params)
+        if error:
+            return "", f"Health check failed: {error}"
+
+        result = {
+            "success": True,
+            "page_id": self.page_id,
+            "graph_api_version": self.graph_api_version,
+            "timeout": self.timeout,
+            "page_response": data,
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False), ""
 
     # =========================
     # HTTP helpers
@@ -527,7 +688,7 @@ class MessengerTool(Tool):
 
     def _parse_limit(
         self,
-        value: Optional[str],
+        value: Optional[Any],
         default: int,
         max_value: int,
     ) -> Tuple[int, str]:
@@ -547,12 +708,105 @@ class MessengerTool(Tool):
 
         return parsed, ""
 
-    def _is_truthy(self, value: Any) -> bool:
+    def _parse_fields(
+        self,
+        raw_fields: Any,
+        default_fields: Optional[List[str]] = None,
+    ) -> List[str]:
+        if raw_fields is None or raw_fields == "":
+            return list(default_fields or [])
+
+        if isinstance(raw_fields, list):
+            return [str(f).strip() for f in raw_fields if str(f).strip()]
+
+        if isinstance(raw_fields, str):
+            return [part.strip() for part in raw_fields.split(",") if part.strip()]
+
+        raise ValueError("Invalid 'fields': must be a comma-separated string or a list")
+
+    def _parse_bool(self, value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
         if isinstance(value, bool):
             return value
-        if value is None:
-            return False
         return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _is_truthy(self, value: Any) -> bool:
+        return self._parse_bool(value, default=False)
+
+    def _required_str(
+        self,
+        arguments: Dict[str, Any],
+        key: str,
+        allow_empty: bool = False,
+    ) -> Optional[str]:
+        value = arguments.get(key)
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        if not allow_empty and not normalized:
+            return None
+        return normalized
+
+    def _optional_str(self, arguments: Dict[str, Any], key: str) -> Optional[str]:
+        value = arguments.get(key)
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        return normalized or None
+
+    def _normalize_paging(self, paging: Any) -> Dict[str, Any]:
+        paging = paging if isinstance(paging, dict) else {}
+        cursors = paging.get("cursors", {}) if isinstance(paging, dict) else {}
+
+        return {
+            "next_cursor": cursors.get("after"),
+            "previous_cursor": cursors.get("before"),
+            "has_next_page": "next" in paging,
+            "has_previous_page": "previous" in paging,
+        }
+
+    def _extract_attachments(self, message_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """Extract and format attachments from message data (voice, images, videos, etc.)."""
+        attachments_data = message_data.get("attachments", {})
+        if not attachments_data or not isinstance(attachments_data, dict):
+            return None
+        
+        attachments = attachments_data.get("data", [])
+        if not attachments:
+            return None
+        
+        formatted_attachments = []
+        for attachment in attachments:
+            # Determine type from mime_type
+            mime_type = attachment.get("mime_type", "")
+            attachment_type = "file"
+            
+            if mime_type.startswith("audio"):
+                attachment_type = "audio"
+            elif mime_type.startswith("image"):
+                attachment_type = "image"
+            elif mime_type.startswith("video"):
+                attachment_type = "video"
+            
+            formatted = {
+                "type": attachment_type,
+                "url": attachment.get("file_url"),
+                "name": attachment.get("name"),
+                "mime_type": mime_type,
+                "size": attachment.get("size"),
+            }
+            
+            # Add type-specific info
+            if attachment_type == "audio":
+                formatted["audio_type"] = "voice_message"
+            
+            formatted_attachments.append(formatted)
+        
+        return formatted_attachments if formatted_attachments else None
+
 
     # =========================
     # Help
@@ -571,11 +825,22 @@ CURRENT CONFIG:
 REQUIRED ENV:
     MESSENGER_PAGE_ACCESS_TOKEN=your_page_access_token_here
     MESSENGER_PAGE_ID=your_page_id_here
+
+OPTIONAL ENV:
     MESSENGER_GRAPH_API_VERSION={self.graph_api_version}
+    MESSENGER_REQUEST_TIMEOUT={self.timeout}
 
-OPERATIONS:
+SUPPORTED OPERATIONS:
 
-1) send_message
+1) health
+   Verify access token / page access and basic API connectivity.
+
+   Example:
+   {{
+     "operation": "health"
+   }}
+
+2) send_message
    Send a text message to a user who already contacted your Page.
 
    Example:
@@ -586,7 +851,7 @@ OPERATIONS:
      "messaging_type": "RESPONSE"
    }}
 
-   Optional MESSAGE_TAG example:
+   MESSAGE_TAG example:
    {{
      "operation": "send_message",
      "recipient_id": "1234567890",
@@ -595,13 +860,20 @@ OPERATIONS:
      "tag": "POST_PURCHASE_UPDATE"
    }}
 
-2) list_conversations
-   List recent conversations.
+3) list_conversations
+   List recent Messenger conversations for the page.
 
    Example:
    {{
      "operation": "list_conversations",
      "limit": 10
+   }}
+
+   With fields:
+   {{
+     "operation": "list_conversations",
+     "limit": 10,
+     "fields": "id,updated_time,link"
    }}
 
    With pagination:
@@ -611,7 +883,23 @@ OPERATIONS:
      "after": "CURSOR_VALUE"
    }}
 
-3) read_conversation
+4) get_conversation
+   Get details for one conversation/chat.
+
+   Example:
+   {{
+     "operation": "get_conversation",
+     "conversation_id": "t_xxxxxxxxxxxxx"
+   }}
+
+   With explicit fields:
+   {{
+     "operation": "get_conversation",
+     "conversation_id": "t_xxxxxxxxxxxxx",
+     "fields": "id,updated_time,link"
+   }}
+
+5) read_conversation
    Read messages from a conversation.
 
    Example:
@@ -619,6 +907,14 @@ OPERATIONS:
      "operation": "read_conversation",
      "conversation_id": "t_xxxxxxxxxxxxx",
      "limit": 20
+   }}
+
+   Without fetching full message details:
+   {{
+     "operation": "read_conversation",
+     "conversation_id": "t_xxxxxxxxxxxxx",
+     "limit": 20,
+     "include_details": false
    }}
 
    With pagination:
@@ -629,12 +925,56 @@ OPERATIONS:
      "after": "CURSOR_VALUE"
    }}
 
-NOTES:
-    - recipient_id is the user's PSID (Page-Scoped ID)
-    - list_conversations requires platform=messenger
-    - read_conversation fetches message IDs first, then message details
-    - detailed data may only be available for the 20 most recent messages
-    - Meta messaging window and policy restrictions still apply
+6) get_message
+   Get one message by message_id.
+
+   Example:
+   {{
+     "operation": "get_message",
+     "message_id": "m_xxxxxxxxxxxxx"
+   }}
+
+   With explicit fields:
+   {{
+     "operation": "get_message",
+     "message_id": "m_xxxxxxxxxxxxx",
+     "fields": "id,created_time,from,to,message"
+   }}
+
+7) get_user_profile
+   Get basic profile fields for a PSID/user id.
+
+   Example:
+   {{
+     "operation": "get_user_profile",
+     "user_id": "1234567890"
+   }}
+
+   With explicit fields:
+   {{
+     "operation": "get_user_profile",
+     "user_id": "1234567890",
+     "fields": "id,name"
+   }}
+
+8) help
+   Show this help text.
+
+IMPORTANT NOTES:
+    - recipient_id is usually the user's PSID (Page-Scoped ID)
+    - get_user_profile NOW returns first_name, last_name, email, picture by default!
+    - list_conversations uses platform=messenger
+    - read_conversation first fetches message refs, then optionally message details
+    - Meta may restrict detailed data to only the most recent messages
+    - current implementation caps detailed message reading at {self.MAX_MESSAGE_DETAILS_LIMIT}
+    - fields support depends on your app permissions and API availability
+    - Meta messaging windows, tags and platform policies still apply
+
+COMMON ERRORS:
+    - invalid/expired page token
+    - missing page permissions
+    - requesting unsupported fields
+    - trying to message a user who never contacted the Page
 """
         return help_text, ""
 
@@ -642,10 +982,136 @@ NOTES:
 if __name__ == "__main__":
     tool = MessengerTool()
 
-    result, error = tool.execute({"operation": "help"})
+    def run_case(title: str, payload: dict):
+        print("\n" + "=" * 60)
+        print(f"CASE: {title}")
+        print("- payload:")
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    if error:
-        print("ERROR:")
-        print(error)
-    else:
-        print(result)
+        result, error = tool.execute(payload)
+
+        if error:
+            print("- ERROR:")
+            print(error)
+        else:
+            print("- RESULT:")
+            try:
+                parsed = json.loads(result)
+                print(json.dumps(parsed, indent=2, ensure_ascii=False))
+            except Exception:
+                print(result)
+
+    # =========================
+    # BASIC / DEBUG
+    # =========================
+    run_case(
+        "HELP",
+        {"operation": "help"}
+    )
+
+    run_case(
+        "HEALTH CHECK",
+        {"operation": "health"}
+    )
+
+    # =========================
+    # SEND MESSAGE
+    # =========================
+    run_case(
+        "SEND MESSAGE (RESPONSE)",
+        {
+            "operation": "send_message",
+            "recipient_id": "USER_PSID_HERE",
+            "message": "Hello from MessengerTool 👋",
+            "messaging_type": "RESPONSE"
+        }
+    )
+
+    run_case(
+        "SEND MESSAGE (MESSAGE_TAG)",
+        {
+            "operation": "send_message",
+            "recipient_id": "USER_PSID_HERE",
+            "message": "Your order has shipped 📦",
+            "messaging_type": "MESSAGE_TAG",
+            "tag": "POST_PURCHASE_UPDATE"
+        }
+    )
+
+    # =========================
+    # CONVERSATIONS
+    # =========================
+    run_case(
+        "LIST CONVERSATIONS (default)",
+        {
+            "operation": "list_conversations"
+        }
+    )
+
+    run_case(
+        "LIST CONVERSATIONS (with fields)",
+        {
+            "operation": "list_conversations",
+            "limit": 5,
+            "fields": "id,updated_time"
+        }
+    )
+
+    # =========================
+    # SINGLE CONVERSATION
+    # =========================
+    run_case(
+        "GET CONVERSATION",
+        {
+            "operation": "get_conversation",
+            "conversation_id": "t_CONVERSATION_ID_HERE"
+        }
+    )
+
+    # =========================
+    # READ MESSAGES
+    # =========================
+    run_case(
+        "READ CONVERSATION (with details)",
+        {
+            "operation": "read_conversation",
+            "conversation_id": "t_CONVERSATION_ID_HERE",
+            "limit": 5,
+            "include_details": True
+        }
+    )
+
+    run_case(
+        "READ CONVERSATION (without details)",
+        {
+            "operation": "read_conversation",
+            "conversation_id": "t_CONVERSATION_ID_HERE",
+            "limit": 5,
+            "include_details": False
+        }
+    )
+
+    # =========================
+    # MESSAGE
+    # =========================
+    run_case(
+        "GET MESSAGE",
+        {
+            "operation": "get_message",
+            "message_id": "m_MESSAGE_ID_HERE"
+        }
+    )
+
+    # =========================
+    # USER PROFILE
+    # =========================
+    run_case(
+        "GET USER PROFILE",
+        {
+            "operation": "get_user_profile",
+            "user_id": "USER_PSID_HERE"
+        }
+    )
+
+    print("\n" + "=" * 60)
+    print("DONE")

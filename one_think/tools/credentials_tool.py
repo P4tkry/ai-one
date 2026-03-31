@@ -21,20 +21,8 @@ class CredentialsTool(Tool):
     """
 
     name: str = "credentials"
-    description: str = (
-        "Manages encrypted credentials stored in SQLite database. "
-        "Operations: store, list, get_credentials, delete."
-    )
+    description: str = "Manages encrypted credentials stored in SQLite database."
 
-    arguments: Dict[str, str] = {
-        "help": "bool (if true, returns detailed information about the tool)",
-        "operation": "str ('store', 'list', 'get_credentials', 'delete')",
-        "service_name": "str (service name, e.g. 'github')",
-        "username": "str (required for 'store')",
-        "password": "str (required for 'store')",
-        "metadata": "str (JSON string, optional)",
-        "db_path": "str (path to database file, default from .env or 'persistent/credentials.db')"
-    }
 
     def __init__(self):
         super().__init__()
