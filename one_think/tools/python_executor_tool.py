@@ -1,22 +1,34 @@
+"""
+PythonExecutorTool - Full JSON migration
+Execute Python code with structured JSON responses
+"""
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Dict, Any, Optional, Callable
 
-from one_think.tools import Tool
+from one_think.tools.base import Tool, ToolResponse
 
 
 class PythonExecutorTool(Tool):
     """
     Tool for executing Python scripts and code.
 
-    Security model:
-    - This tool is intended for trusted/local use.
-    - It is NOT a secure sandbox.
-    - By default, file execution is restricted to allowed directories.
-    - Optional "sandbox" mode adds best-effort isolation and resource limits.
+    Execution modes:
+    - secure:
+        Best-effort restricted execution:
+        * no network access at Python level
+        * isolated working directory
+        * minimal environment
+        * resource limits (POSIX)
+    - insecure:
+        Full local execution with inherited environment and no extra restrictions
+
+    IMPORTANT:
+    This is still NOT a hardened security boundary.
+    For real isolation use containers / VM / OS sandboxing.
     """
 
     name = "python_executor"
@@ -37,76 +49,60 @@ class PythonExecutorTool(Tool):
             "PYTHONUNBUFFERED": "1",
         }
 
-        # Default resource limits for sandbox mode
-        self.sandbox_limits = {
+        # Resource limits for secure mode
+        self.secure_limits = {
             "cpu_seconds": 2,
             "memory_bytes": 256 * 1024 * 1024,   # 256 MB
             "file_size_bytes": 10 * 1024 * 1024, # 10 MB
             "nofile": 32,
         }
 
-    def execute(self, arguments: dict[str, Any]) -> Tuple[str, str]:
-        """Execute the selected tool operation."""
-        if not isinstance(arguments, dict):
-            return "", "Arguments must be a dictionary"
-
-        if self._to_bool(arguments.get("help", False)):
-            return self._show_help()
-
-        operation = arguments.get("operation")
-        if not isinstance(operation, str) or not operation.strip():
-            return "", "Missing required argument: 'operation'"
-
-        operation = operation.strip()
-        timeout = self._parse_timeout(arguments.get("timeout"), default=30)
-        sandbox = self._to_bool(arguments.get("sandbox", False))
-        sandbox_network = self._to_bool(arguments.get("sandbox_network", False))
-        sandbox_readonly = self._to_bool(arguments.get("sandbox_readonly", True))
-        raw_output = self._to_bool(arguments.get("raw_output", False))
-
+    def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
+        """Execute Python code with JSON response."""
+        
+        # Validate required params
+        error = self.validate_required_params(params, required=["operation"])
+        if error:
+            return error
+        
+        operation = params["operation"]
+        timeout = self._parse_timeout(params.get("timeout"), default=30)
+        mode = self._parse_mode(params.get("mode", "secure"))
+        raw_output = self._to_bool(params.get("raw_output", False))
+        
+        # Route to operation handlers
         if operation == "execute":
-            code = arguments.get("code")
-            working_dir = arguments.get("working_dir", ".")
-            return self._execute_code(
-                code=code,
-                timeout=timeout,
-                working_dir=working_dir,
-                sandbox=sandbox,
-                sandbox_network=sandbox_network,
-                sandbox_readonly=sandbox_readonly,
-                raw_output=raw_output,
+            return self._execute_code(params, timeout, mode, raw_output, request_id)
+        elif operation == "execute_file":
+            return self._execute_file(params, timeout, mode, raw_output, request_id)
+        else:
+            return self._create_error_response(
+                f"Unknown operation: '{operation}'. Valid operations: execute, execute_file",
+                request_id=request_id
             )
-
-        if operation == "execute_file":
-            file_path = arguments.get("file_path")
-            working_dir = arguments.get("working_dir")
-            return self._execute_file(
-                file_path=file_path,
-                timeout=timeout,
-                working_dir=working_dir,
-                sandbox=sandbox,
-                sandbox_network=sandbox_network,
-                sandbox_readonly=sandbox_readonly,
-                raw_output=raw_output,
-            )
-
-        if operation == "help":
-            return self._show_help()
-
-        return "", "Unknown operation. Valid operations: execute, execute_file, help"
-
+    
+    def _parse_mode(self, value: Any) -> str:
+        """Parse execution mode safely."""
+        if not isinstance(value, str):
+            return "secure"
+        
+        normalized = value.strip().lower()
+        if normalized in {"secure", "insecure"}:
+            return normalized
+        return "secure"
+    
     def _parse_timeout(self, value: Any, default: int = 30) -> int:
         """Parse timeout safely and enforce sane bounds."""
         try:
             timeout = int(value) if value is not None else default
         except (TypeError, ValueError):
             return default
-
+        
         if timeout <= 0:
             return default
-
+        
         return min(timeout, 300)
-
+    
     def _to_bool(self, value: Any) -> bool:
         """Convert common truthy values to bool."""
         if isinstance(value, bool):
@@ -116,24 +112,24 @@ class PythonExecutorTool(Tool):
         if isinstance(value, int):
             return value != 0
         return False
-
-    def _validate_working_dir(self, working_dir: Any) -> Tuple[Path | None, str]:
+    
+    def _validate_working_dir(self, working_dir: Any) -> tuple[Optional[Path], str]:
         """Validate and normalize working directory."""
         if working_dir is None:
             return None, ""
-
+        
         if not isinstance(working_dir, str) or not working_dir.strip():
             return None, "Invalid working_dir: must be a non-empty string"
-
+        
         path = Path(working_dir).resolve()
-
+        
         if not path.exists():
             return None, f"Working directory not found: {working_dir}"
         if not path.is_dir():
             return None, f"Working directory is not a directory: {working_dir}"
-
+        
         return path, ""
-
+    
     def _is_path_allowed(self, path: Path) -> bool:
         """Check whether a path is within one of the allowed roots."""
         resolved = path.resolve()
@@ -144,21 +140,12 @@ class PythonExecutorTool(Tool):
             except ValueError:
                 continue
         return False
-
-    def _build_env(self, sandbox: bool = False, sandbox_network: bool = False) -> dict[str, str]:
-        """
-        Build environment for subprocess.
-
-        sandbox=False:
-            Minimal inherited environment.
-
-        sandbox=True:
-            Much more restrictive environment.
-        """
+    
+    def _build_env(self, mode: str) -> dict[str, str]:
+        """Build environment for subprocess."""
         env: dict[str, str] = {}
-
-        if sandbox:
-            # Minimal environment in sandbox mode
+        
+        if mode == "secure":
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUNBUFFERED"] = "1"
             env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -166,266 +153,371 @@ class PythonExecutorTool(Tool):
             env["HOME"] = tempfile.gettempdir()
             env["TMP"] = tempfile.gettempdir()
             env["TEMP"] = tempfile.gettempdir()
-
-            # Policy flag only; does NOT truly disable networking at OS level.
-            env["PY_EXECUTOR_SANDBOX"] = "1"
-            env["PY_EXECUTOR_NETWORK"] = "1" if sandbox_network else "0"
-
-            # Minimal PATH so sys.executable dependencies still work
+            env["PY_EXECUTOR_MODE"] = "secure"
+            env["PY_EXECUTOR_NETWORK"] = "0"
+            
             if "PATH" in os.environ:
                 env["PATH"] = os.environ["PATH"]
-
+            
             return env
-
-        # Non-sandbox: lightly restricted env
-        if "PATH" in os.environ:
-            env["PATH"] = os.environ["PATH"]
-
-        for key in ("SYSTEMROOT", "WINDIR", "HOME", "USERPROFILE", "TMP", "TEMP"):
-            if key in os.environ:
-                env[key] = os.environ[key]
-
+        
+        # insecure mode
+        env.update(os.environ)
         env.update(self.base_env)
+        env["PY_EXECUTOR_MODE"] = "insecure"
+        env["PY_EXECUTOR_NETWORK"] = "1"
         return env
-
-    def _format_result(
-        self,
-        stdout: str,
-        stderr: str,
-        returncode: int,
-        executed_label: str | None = None,
-        sandbox: bool = False,
-    ) -> str:
-        """Format subprocess output in a consistent way."""
-        output: list[str] = []
-
-        if executed_label:
-            output.append(f"=== EXECUTED: {executed_label} ===")
-
-        output.append(f"=== SANDBOX MODE: {'ON' if sandbox else 'OFF'} ===")
-
-        if stdout:
-            output.append("=== STDOUT ===")
-            output.append(stdout.rstrip())
-
-        if stderr:
-            output.append("=== STDERR ===")
-            output.append(stderr.rstrip())
-
-        output.append(f"=== EXIT CODE: {returncode} ===")
-
-        if not stdout and not stderr:
-            output.append("Script executed successfully (no output)")
-
-        return "\n".join(output)
-
-    def _build_python_cmd(self, target_path: Path, sandbox: bool) -> list[str]:
-        """
-        Build python invocation command.
-
-        In sandbox mode use isolated flags:
-        -I : isolated mode
-        -S : don't import site
-        -B : don't write .pyc
-        -E : ignore PYTHON* environment variables
-        """
-        if sandbox:
+    
+    def _build_python_cmd(self, target_path: Path, mode: str) -> list[str]:
+        """Build python invocation command."""
+        if mode == "secure":
             return [sys.executable, "-I", "-S", "-B", "-E", str(target_path)]
         return [sys.executable, str(target_path)]
-
-    def _make_preexec_fn(self, sandbox: bool):
-        """
-        POSIX-only resource limiting hook.
-        Returns None on unsupported systems.
-        """
-        if not sandbox:
+    
+    def _make_preexec_fn(self, mode: str) -> Optional[Callable]:
+        """POSIX-only resource limiting hook."""
+        if mode != "secure":
             return None
-
+        
         if os.name != "posix":
             return None
-
+        
         def _preexec():
             import resource
-
-            limits = self.sandbox_limits
-
-            # CPU time
+            
+            limits = self.secure_limits
+            
             resource.setrlimit(resource.RLIMIT_CPU, (limits["cpu_seconds"], limits["cpu_seconds"]))
-
-            # Address space / memory
             resource.setrlimit(resource.RLIMIT_AS, (limits["memory_bytes"], limits["memory_bytes"]))
-
-            # Max file size
             resource.setrlimit(resource.RLIMIT_FSIZE, (limits["file_size_bytes"], limits["file_size_bytes"]))
-
-            # Max open files
             resource.setrlimit(resource.RLIMIT_NOFILE, (limits["nofile"], limits["nofile"]))
-
-            # No child processes
+            
             if hasattr(resource, "RLIMIT_NPROC"):
                 resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
-
+        
         return _preexec
+    
+    def _wrap_secure_code(self, user_code: str) -> str:
+        """Wrap user code with a Python-level network blocker."""
+        return f'''# --- secure wrapper injected by PythonExecutorTool ---
+import socket
 
+class _NetworkDisabledError(RuntimeError):
+    pass
+
+def _deny_network(*args, **kwargs):
+    raise _NetworkDisabledError("Network access is disabled in secure mode")
+
+socket.socket = _deny_network
+socket.create_connection = _deny_network
+if hasattr(socket, "socketpair"):
+    socket.socketpair = _deny_network
+if hasattr(socket, "fromfd"):
+    socket.fromfd = _deny_network
+
+# --- user code starts here ---
+{user_code}
+'''
+    
+    def _prepare_secure_temp_script(self, source_code: str, tmp_root: Path) -> Path:
+        """Create wrapped secure script file in temp directory."""
+        wrapped_code = self._wrap_secure_code(source_code)
+        tmp_path = tmp_root / "inline_exec.py"
+        tmp_path.write_text(wrapped_code, encoding="utf-8")
+        return tmp_path
+    
+    def _prepare_secure_file_script(self, source_path: Path, tmp_root: Path) -> Path:
+        """Copy a file into temp dir and prepend secure wrapper."""
+        original_code = source_path.read_text(encoding="utf-8")
+        wrapped_code = self._wrap_secure_code(original_code)
+        tmp_path = tmp_root / source_path.name
+        tmp_path.write_text(wrapped_code, encoding="utf-8")
+        return tmp_path
+    
     def _run_python_target(
         self,
         target_path: Path,
         timeout: int,
-        working_dir: Path | None,
-        executed_label: str | None = None,
-        sandbox: bool = False,
-        sandbox_network: bool = False,
-        raw_output: bool = False,
-    ) -> Tuple[str, str]:
+        working_dir: Optional[Path],
+        executed_label: Optional[str],
+        mode: str,
+        raw_output: bool,
+    ) -> Dict[str, Any]:
         """Run a Python file and collect output."""
         try:
             result = subprocess.run(
-                self._build_python_cmd(target_path=target_path, sandbox=sandbox),
+                self._build_python_cmd(target_path=target_path, mode=mode),
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 cwd=str(working_dir) if working_dir else None,
-                env=self._build_env(sandbox=sandbox, sandbox_network=sandbox_network),
-                preexec_fn=self._make_preexec_fn(sandbox),
+                env=self._build_env(mode=mode),
+                preexec_fn=self._make_preexec_fn(mode),
             )
-
-            if raw_output:
-                # Return raw output: stdout, then stderr if present
-                output = result.stdout
-                if result.stderr:
-                    output += result.stderr
-                return output, ""
-            else:
-                # Return formatted output (original behavior)
-                formatted = self._format_result(
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    returncode=result.returncode,
-                    executed_label=executed_label,
-                    sandbox=sandbox,
-                )
-                return formatted, ""
-
+            
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+                "executed": executed_label,
+                "mode": mode,
+                "timed_out": False
+            }
+        
         except subprocess.TimeoutExpired:
-            return "", f"Script execution timed out after {timeout} seconds"
+            return {
+                "error": f"Script execution timed out after {timeout} seconds",
+                "timed_out": True,
+                "timeout": timeout
+            }
         except FileNotFoundError as exc:
-            return "", f"Execution failed: {exc}"
+            return {"error": f"Execution failed: {exc}"}
         except OSError as exc:
-            return "", f"OS error during execution: {exc}"
+            return {"error": f"OS error during execution: {exc}"}
         except Exception as exc:
-            return "", f"Unexpected execution error: {exc}"
-
+            return {"error": f"Unexpected execution error: {exc}"}
+    
     def _execute_code(
         self,
-        code: Any,
-        timeout: int = 30,
-        working_dir: Any = ".",
-        sandbox: bool = False,
-        sandbox_network: bool = False,
-        sandbox_readonly: bool = True,
-        raw_output: bool = False,
-    ) -> Tuple[str, str]:
+        params: Dict[str, Any],
+        timeout: int,
+        mode: str,
+        raw_output: bool,
+        request_id: Optional[str]
+    ) -> ToolResponse:
         """Execute Python code by writing it to a temporary file."""
+        code = params.get("code")
+        
         if not isinstance(code, str) or not code.strip():
-            return "", "Missing required argument: code"
-
+            return self._create_error_response(
+                "Missing required parameter: 'code'",
+                request_id=request_id
+            )
+        
+        working_dir = params.get("working_dir", ".")
         wd_path, wd_error = self._validate_working_dir(working_dir)
         if wd_error:
-            return "", wd_error
-
+            return self._create_error_response(wd_error, request_id=request_id)
+        
         try:
             with tempfile.TemporaryDirectory(prefix="pyexec_") as tmp_dir:
                 tmp_root = Path(tmp_dir)
-
-                # In sandbox_readonly mode use temp dir as cwd to reduce accidental writes
-                effective_wd = tmp_root if sandbox and sandbox_readonly else wd_path
-
-                tmp_path = tmp_root / "inline_exec.py"
-                tmp_path.write_text(code, encoding="utf-8")
-
-                return self._run_python_target(
+                
+                # secure -> isolate cwd into temp dir
+                # insecure -> use requested working dir
+                effective_wd = tmp_root if mode == "secure" else wd_path
+                
+                if mode == "secure":
+                    tmp_path = self._prepare_secure_temp_script(code, tmp_root)
+                else:
+                    tmp_path = tmp_root / "inline_exec.py"
+                    tmp_path.write_text(code, encoding="utf-8")
+                
+                exec_result = self._run_python_target(
                     target_path=tmp_path,
                     timeout=timeout,
                     working_dir=effective_wd,
                     executed_label="<inline_code>",
-                    sandbox=sandbox,
-                    sandbox_network=sandbox_network,
+                    mode=mode,
                     raw_output=raw_output,
                 )
-
+                
+                # Check for errors
+                if "error" in exec_result:
+                    return self._create_error_response(
+                        exec_result["error"],
+                        request_id=request_id
+                    )
+                
+                # Build result
+                result = {
+                    "stdout": exec_result["stdout"],
+                    "stderr": exec_result["stderr"],
+                    "returncode": exec_result["returncode"],
+                    "executed": exec_result["executed"],
+                    "mode": mode.upper(),
+                    "timeout": timeout
+                }
+                
+                # Add raw output if requested
+                if raw_output:
+                    result["raw_output"] = exec_result["stdout"] + exec_result["stderr"]
+                
+                return self._create_success_response(
+                    result=result,
+                    request_id=request_id
+                )
+        
         except Exception as exc:
-            return "", f"Error preparing code execution: {exc}"
-
+            return self._create_error_response(
+                f"Error preparing code execution: {exc}",
+                request_id=request_id
+            )
+    
     def _execute_file(
         self,
-        file_path: Any,
-        timeout: int = 30,
-        working_dir: Any = None,
-        sandbox: bool = False,
-        sandbox_network: bool = False,
-        sandbox_readonly: bool = True,
-        raw_output: bool = False,
-    ) -> Tuple[str, str]:
+        params: Dict[str, Any],
+        timeout: int,
+        mode: str,
+        raw_output: bool,
+        request_id: Optional[str]
+    ) -> ToolResponse:
         """Execute an existing Python file."""
+        file_path = params.get("file_path")
+        
         if not isinstance(file_path, str) or not file_path.strip():
-            return "", "Missing required argument: file_path"
-
+            return self._create_error_response(
+                "Missing required parameter: 'file_path'",
+                request_id=request_id
+            )
+        
         script_path = Path(file_path).resolve()
-
+        
         if not script_path.exists():
-            return "", f"File not found: {file_path}"
-
+            return self._create_error_response(
+                f"File not found: {file_path}",
+                request_id=request_id
+            )
+        
         if not script_path.is_file():
-            return "", f"Path is not a file: {file_path}"
-
+            return self._create_error_response(
+                f"Path is not a file: {file_path}",
+                request_id=request_id
+            )
+        
         if script_path.suffix.lower() != ".py":
-            return "", "File must be a Python script (.py)"
-
+            return self._create_error_response(
+                "File must be a Python script (.py)",
+                request_id=request_id
+            )
+        
         if not self._is_path_allowed(script_path):
             allowed = ", ".join(str(p) for p in self.allowed_roots)
-            return "", (
-                "Access denied: file is outside allowed directories. "
-                f"Allowed roots: {allowed}"
+            return self._create_error_response(
+                f"Access denied: file is outside allowed directories. Allowed roots: {allowed}",
+                request_id=request_id
             )
-
+        
+        working_dir = params.get("working_dir")
         wd_path, wd_error = self._validate_working_dir(working_dir)
         if wd_error:
-            return "", wd_error
-
+            return self._create_error_response(wd_error, request_id=request_id)
+        
         if wd_path is None:
             wd_path = script_path.parent
-
+        
         try:
             with tempfile.TemporaryDirectory(prefix="pyexec_") as tmp_dir:
                 tmp_root = Path(tmp_dir)
-                effective_wd = tmp_root if sandbox and sandbox_readonly else wd_path
-
-                return self._run_python_target(
-                    target_path=script_path,
+                
+                # secure -> run copied/wrapped file in isolated temp cwd
+                # insecure -> run original file in normal cwd
+                if mode == "secure":
+                    effective_wd = tmp_root
+                    target_path = self._prepare_secure_file_script(script_path, tmp_root)
+                else:
+                    effective_wd = wd_path
+                    target_path = script_path
+                
+                exec_result = self._run_python_target(
+                    target_path=target_path,
                     timeout=timeout,
                     working_dir=effective_wd,
                     executed_label=file_path,
-                    sandbox=sandbox,
-                    sandbox_network=sandbox_network,
+                    mode=mode,
                     raw_output=raw_output,
                 )
+                
+                # Check for errors
+                if "error" in exec_result:
+                    return self._create_error_response(
+                        exec_result["error"],
+                        request_id=request_id
+                    )
+                
+                # Build result
+                result = {
+                    "stdout": exec_result["stdout"],
+                    "stderr": exec_result["stderr"],
+                    "returncode": exec_result["returncode"],
+                    "executed": exec_result["executed"],
+                    "mode": mode.upper(),
+                    "file_path": str(script_path),
+                    "timeout": timeout
+                }
+                
+                # Add raw output if requested
+                if raw_output:
+                    result["raw_output"] = exec_result["stdout"] + exec_result["stderr"]
+                
+                return self._create_success_response(
+                    result=result,
+                    request_id=request_id
+                )
+        
         except Exception as exc:
-            return "", f"Error preparing file execution: {exc}"
-
-    def _show_help(self) -> Tuple[str, str]:
-        """Show help information."""
-        help_text = f"""Python Executor Tool
+            return self._create_error_response(
+                f"Error preparing file execution: {exc}",
+                request_id=request_id
+            )
+    
+    def get_help(self) -> str:
+        """Return comprehensive help text."""
+        allowed_dirs = os.linesep.join(f"    - {str(p)}" for p in self.allowed_roots)
+        
+        return f"""Python Executor Tool
 
 DESCRIPTION:
     Execute Python code or Python script files in a subprocess.
 
+EXECUTION MODES:
+    secure (default)
+        Restricted execution mode designed for safety:
+        - network access disabled (Python-level)
+        - isolated temporary working directory
+        - minimal environment variables
+        - resource limits (CPU, memory, file size)
+
+        USE THIS MODE:
+        - for untrusted or user-generated code
+        - for testing logic, algorithms, parsing, transformations
+        - when no internet access is required
+
+        LIMITATIONS:
+        - HTTP requests will fail
+        - downloading files will fail
+        - APIs and external services are unavailable
+        - some libraries may break if they expect network or system access
+
+    insecure
+        Full local execution with access to system environment:
+        - network access ENABLED
+        - full environment variables (PATH, HOME, etc.)
+        - no additional restrictions
+
+        USE THIS MODE WHEN:
+        - your code needs internet access (requests, urllib, APIs)
+        - you install packages (pip, poetry, etc.)
+        - you access external services (databases, REST APIs)
+        - secure mode fails due to missing network or environment
+
+        EXAMPLES:
+            - requests.get(...)
+            - urllib.request.urlopen(...)
+            - downloading models or datasets
+            - connecting to external DB / API
+
+        WARNING:
+            This mode executes code with full system access.
+            Do NOT use with untrusted input.
+
 IMPORTANT:
-    This tool is not a secure sandbox.
-    Sandbox mode is best-effort hardening only.
-    File execution is restricted to allowed directories.
+    This tool is NOT a fully secure sandbox.
+    "secure" mode is best-effort only.
+    For strong isolation use containers or VM-based execution.
 
 ALLOWED DIRECTORIES:
-    {os.linesep.join(f"    - {str(p)}" for p in self.allowed_roots)}
+{allowed_dirs}
 
 OPERATIONS:
     execute
@@ -434,12 +526,13 @@ OPERATIONS:
     execute_file
         Execute an existing .py file.
 
-    help
-        Show this help message.
-
 PARAMETERS:
     operation (string, required)
-        One of: execute, execute_file, help
+        One of: execute, execute_file
+
+    mode (string, optional)
+        One of: secure, insecure
+        Default: secure
 
     code (string)
         Required for operation=execute
@@ -453,40 +546,62 @@ PARAMETERS:
     working_dir (string, optional)
         Working directory for process execution
 
-    sandbox (boolean, optional)
-        Enable best-effort sandbox mode
-
-    sandbox_network (boolean, optional)
-        Allow network in sandbox mode. Default: false
-        NOTE: this is policy metadata only unless enforced externally.
-
-    sandbox_readonly (boolean, optional)
-        Use isolated temp working directory in sandbox mode. Default: true
+    raw_output (boolean, optional)
+        If true: returns raw stdout and stderr combined
 
 EXAMPLES:
-    {{"operation": "execute", "code": "print('Hello World')"}}
 
+    # Safe execution (no internet)
     {{"operation": "execute",
-      "code": "print('safe-ish run')",
-      "sandbox": true}}
+      "code": "print('Hello World')"}}
 
+    # This will FAIL in secure mode (no network)
+    {{"operation": "execute",
+      "mode": "secure",
+      "code": "import requests; print(requests.get('https://example.com'))"}}
+
+    # Fix: use insecure mode for network access
+    {{"operation": "execute",
+      "mode": "insecure",
+      "code": "import requests; print(requests.get('https://example.com').status_code)"}}
+
+    # Execute file securely
     {{"operation": "execute_file",
       "file_path": "scripts/test.py",
-      "sandbox": true,
-      "timeout": 5}}
+      "mode": "secure"}}
 
-OUTPUT FORMAT:
-    === EXECUTED: ... ===
-    === SANDBOX MODE: ON/OFF ===
-    === STDOUT ===
-    ...
-    === STDERR ===
-    ...
-    === EXIT CODE: N ===
+    # Execute file with full access
+    {{"operation": "execute_file",
+      "file_path": "scripts/api_client.py",
+      "mode": "insecure"}}
+
+RESPONSE FORMAT:
+    Success:
+        {{
+            "status": "success",
+            "result": {{
+                "stdout": "...",
+                "stderr": "...",
+                "returncode": 0,
+                "executed": "<inline_code>" or "path/to/file.py",
+                "mode": "SECURE" or "INSECURE",
+                "timeout": 30,
+                "raw_output": "..."  // if raw_output=true
+            }}
+        }}
+    
+    Error:
+        {{
+            "status": "error",
+            "error": {{
+                "message": "Error description",
+                "type": "ToolExecutionError"
+            }}
+        }}
 
 NOTES:
-    - STDERR does not always mean failure.
-    - Non-zero exit code usually indicates an error.
-    - Sandbox mode is not a full security boundary.
+    - If your code fails with network errors -> try mode="insecure"
+    - If your code is untrusted -> ALWAYS use mode="secure"
+    - STDERR does not always mean failure
+    - Non-zero exit code usually indicates an error
 """
-        return help_text, ""

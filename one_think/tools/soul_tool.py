@@ -1,36 +1,49 @@
-from one_think.tools import Tool
+"""
+Soul Tool - System instructions and behavior guidelines management.
+
+Migrated to new JSON format with strict validation and structured responses.
+"""
+
 import os
+import time
+from typing import Any, Optional
 from dotenv import load_dotenv
+from one_think.tools.base import Tool, ToolResponse
 
 load_dotenv()
 
 
 class SoulTool(Tool):
+    """
+    Manages SOUL.md file containing system instructions and behavior guidelines.
+    
+    Operations:
+    - read: Get current system instructions
+    - write: Replace entire content
+    - append: Add to existing content
+    - clear: Remove all content
+    """
+    
     name = "soul"
-    description = "Manages the SOUL.md file - system instructions and behavior guidelines."
-
+    description = "Manages SOUL.md file - system instructions and behavior guidelines"
+    version = "2.0.0"
     
     def __init__(self):
         super().__init__()
         self.soul_path = self._get_soul_path()
     
     def _get_soul_path(self) -> str:
-        """Get SOUL.md file path from .env or use default."""
+        """Get SOUL.md file path from environment or use default."""
         soul_path = os.getenv("SOUL_PATH")
-        
         if not soul_path:
-            # Default to SOUL.md in persistent directory
             soul_path = "persistent/SOUL.md"
-        
         return soul_path
     
     def _ensure_file_exists(self):
-        """Ensure SOUL.md file exists, create if not."""
+        """Ensure SOUL.md file exists, create with default template if not."""
         if not os.path.exists(self.soul_path):
-            # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(self.soul_path) or '.', exist_ok=True)
             
-            # Create file with default template
             default_content = """# SOUL - System Instructions
 
 ## System Behavior
@@ -38,191 +51,243 @@ class SoulTool(Tool):
 This section defines how the system should behave and operate.
 
 """
-            try:
-                with open(self.soul_path, 'w', encoding='utf-8') as f:
-                    f.write(default_content)
-            except Exception as e:
-                raise Exception(f"Cannot create SOUL.md file: {e}")
+            with open(self.soul_path, 'w', encoding='utf-8') as f:
+                f.write(default_content)
     
-    def _read_soul(self):
+    def execute_json(
+        self,
+        params: dict[str, Any],
+        request_id: Optional[str] = None
+    ) -> ToolResponse:
+        """
+        Execute soul operation with strict JSON response.
+        
+        Args:
+            params: {
+                "operation": str (required) - read|write|append|clear,
+                "content": str (optional) - for write/append operations
+            }
+            request_id: Optional request ID
+            
+        Returns:
+            ToolResponse with operation result
+        """
+        start_time = time.perf_counter()
+        
+        # Validate operation parameter
+        error_resp = self.validate_required_params(params, ["operation"])
+        if error_resp:
+            return error_resp
+        
+        operation = params["operation"]
+        valid_operations = ["read", "write", "append", "clear"]
+        
+        if operation not in valid_operations:
+            return self._create_error_response(
+                error_type="ValidationError",
+                message=f"Unknown operation: '{operation}'",
+                details={
+                    "provided": operation,
+                    "valid_operations": valid_operations
+                },
+                request_id=request_id
+            )
+        
+        # Execute operation
+        try:
+            if operation == "read":
+                result = self._read_soul()
+            elif operation == "write":
+                result = self._write_soul(params.get("content"))
+            elif operation == "append":
+                result = self._append_soul(params.get("content"))
+            elif operation == "clear":
+                result = self._clear_soul()
+            
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            
+            return self._create_success_response(
+                result=result,
+                request_id=request_id,
+                execution_time_ms=elapsed_ms,
+                metadata={"soul_path": self.soul_path}
+            )
+        
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            return self._create_error_response(
+                error_type=type(e).__name__,
+                message=str(e),
+                details={"operation": operation},
+                request_id=request_id,
+                execution_time_ms=elapsed_ms
+            )
+    
+    def _read_soul(self) -> dict[str, Any]:
         """Read content from SOUL.md file."""
-        try:
-            self._ensure_file_exists()
-            
-            with open(self.soul_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            if not content.strip():
-                return "SOUL.md file is empty", ""
-            
-            return content, ""
-        except Exception as e:
-            return "", f"Error reading SOUL.md: {e}"
+        self._ensure_file_exists()
+        
+        with open(self.soul_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return {
+            "operation": "read",
+            "content": content,
+            "char_count": len(content),
+            "line_count": len(content.split('\n')),
+            "is_empty": not content.strip()
+        }
     
-    def _write_soul(self, content: str):
+    def _write_soul(self, content: Optional[str]) -> dict[str, Any]:
         """Write content to SOUL.md file (overwrite)."""
-        try:
-            if not content:
-                return "", "Content cannot be empty for 'write' operation"
-            
-            with open(self.soul_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            lines_count = len(content.split('\n'))
-            chars_count = len(content)
-            
-            return f"Successfully wrote to SOUL.md ({lines_count} lines, {chars_count} characters)", ""
-        except Exception as e:
-            return "", f"Error writing to SOUL.md: {e}"
+        if content is None:
+            raise ValueError("Content is required for 'write' operation")
+        
+        if not content:
+            raise ValueError("Content cannot be empty for 'write' operation")
+        
+        with open(self.soul_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        return {
+            "operation": "write",
+            "char_count": len(content),
+            "line_count": len(content.split('\n')),
+            "message": "Successfully wrote to SOUL.md"
+        }
     
-    def _append_soul(self, content: str):
+    def _append_soul(self, content: Optional[str]) -> dict[str, Any]:
         """Append content to SOUL.md file."""
-        try:
-            if not content:
-                return "", "Content cannot be empty for 'append' operation"
-            
-            self._ensure_file_exists()
-            
-            with open(self.soul_path, 'a', encoding='utf-8') as f:
-                # Add newline if file doesn't end with one
-                f.write('\n' + content if not content.startswith('\n') else content)
-            
-            return f"Successfully appended to SOUL.md ({len(content)} characters)", ""
-        except Exception as e:
-            return "", f"Error appending to SOUL.md: {e}"
+        if content is None:
+            raise ValueError("Content is required for 'append' operation")
+        
+        if not content:
+            raise ValueError("Content cannot be empty for 'append' operation")
+        
+        self._ensure_file_exists()
+        
+        with open(self.soul_path, 'a', encoding='utf-8') as f:
+            # Add newline if content doesn't start with one
+            if not content.startswith('\n'):
+                f.write('\n')
+            f.write(content)
+        
+        return {
+            "operation": "append",
+            "appended_chars": len(content),
+            "message": "Successfully appended to SOUL.md"
+        }
     
-    def _clear_soul(self):
+    def _clear_soul(self) -> dict[str, Any]:
         """Clear SOUL.md file content."""
-        try:
-            with open(self.soul_path, 'w', encoding='utf-8') as f:
-                f.write("")
-            
-            return "Successfully cleared SOUL.md", ""
-        except Exception as e:
-            return "", f"Error clearing SOUL.md: {e}"
+        with open(self.soul_path, 'w', encoding='utf-8') as f:
+            f.write("")
+        
+        return {
+            "operation": "clear",
+            "message": "Successfully cleared SOUL.md"
+        }
     
-    def _show_help(self):
-        """Show help information for the Soul tool."""
-        help_text = """Soul Tool - SOUL.md Management
+    def get_help(self) -> str:
+        """Return detailed help for soul tool."""
+        return f"""
+Tool: {self.name} (v{self.version})
+Description: {self.description}
 
-DESCRIPTION:
-    Manages the SOUL.md file containing system instructions and behavior guidelines.
-    File path is configured in .env via SOUL_PATH (default: SOUL.md).
+PURPOSE:
+    Manages SOUL.md file containing:
+    - System behavior and personality
+    - Communication style and tone
+    - Operating principles
+    - Technical preferences
+    - Response format guidelines
+    - Error handling approach
 
 OPERATIONS:
-    read    - Read and display the entire content of SOUL.md
-    write   - Write new content to SOUL.md (overwrites existing content)
-    append  - Append content to the end of SOUL.md
-    clear   - Clear all content from SOUL.md
-    help    - Show this help message
 
-ARGUMENTS:
-    operation (required) - The operation to perform
-    content (optional)   - Content for write/append operations
+  read - Read current content from SOUL.md
+    Parameters: none
+    Returns: {{
+      "content": "file content",
+      "char_count": integer,
+      "line_count": integer,
+      "is_empty": boolean
+    }}
 
-EXAMPLES:
-    1. Read current instructions:
-       {"operation": "read"}
-    
-    2. Write new instructions:
-       {"operation": "write", "content": "# New SOUL instructions..."}
-    
-    3. Append additional guidelines:
-       {"operation": "append", "content": "\\n## New Section\\n- Rule 1"}
-    
-    4. Clear all instructions:
-       {"operation": "clear"}
-    
-    5. Show help:
-       {"operation": "help"}
+  write - Replace entire SOUL.md content
+    Parameters:
+      content (string, required): New content to write
+    Returns: {{
+      "char_count": integer,
+      "line_count": integer,
+      "message": "success message"
+    }}
 
-SOUL.MD PURPOSE:
-    - Define system behavior and personality
-    - Set communication style and tone
-    - Establish operating principles
-    - Configure technical preferences
-    - Specify response format
-    - Define error handling approach
+  append - Append content to SOUL.md
+    Parameters:
+      content (string, required): Content to append
+    Returns: {{
+      "appended_chars": integer,
+      "message": "success message"
+    }}
+
+  clear - Clear all content from SOUL.md
+    Parameters: none
+    Returns: {{
+      "message": "success message"
+    }}
 
 CONFIGURATION:
     Set SOUL_PATH in .env file:
-        SOUL_PATH=SOUL.md
+        SOUL_PATH=persistent/SOUL.md
+    
+    Default: persistent/SOUL.md
+
+EXAMPLES:
+
+  1. Read current instructions:
+     {{"operation": "read"}}
+
+  2. Write new instructions:
+     {{
+       "operation": "write",
+       "content": "# New SOUL instructions..."
+     }}
+
+  3. Append guidelines:
+     {{
+       "operation": "append",
+       "content": "\\n## New Section\\n- Rule 1"
+     }}
+
+  4. Clear all:
+     {{"operation": "clear"}}
 
 NOTES:
-    - File is automatically created with default template if it doesn't exist
-    - Use 'write' to completely replace content
+    - File created automatically if doesn't exist
+    - SOUL.md can be version controlled
+    - Contains instructions, not secrets
+    - Use 'write' for complete replacement
     - Use 'append' to add to existing content
-    - SOUL.md can be committed to repository (contains instructions, not secrets)
+
+Current SOUL path: {self.soul_path}
 """
-        return help_text, ""
-    
-    def execute(self, arguments: dict[str, str] = None):
-        """Execute the SOUL operation."""
-        if arguments is None:
-            return "", "No arguments provided"
-        
-        # Check for help first
-        if arguments.get("help"):
-            return self._show_help()
-        
-        operation = arguments.get("operation")
-        if not operation:
-            return "", "Missing required argument: 'operation'"
-        
-        # Execute operation
-        if operation == "read":
-            return self._read_soul()
-        
-        elif operation == "write":
-            content = arguments.get("content")
-            if content is None:
-                return "", "Missing required argument for 'write': content"
-            return self._write_soul(content)
-        
-        elif operation == "append":
-            content = arguments.get("content")
-            if content is None:
-                return "", "Missing required argument for 'append': content"
-            return self._append_soul(content)
-        
-        elif operation == "clear":
-            return self._clear_soul()
-        
-        elif operation == "help":
-            return self._show_help()
-        
-        else:
-            return "", f"Unknown operation: '{operation}'. Valid operations: read, write, append, clear, help"
 
 
 if __name__ == "__main__":
-    # Test the tool
     tool = SoulTool()
     
-    print("=" * 60)
-    print("Testing Soul Tool")
-    print("=" * 60)
+    # Test help
+    print("=== HELP ===")
+    resp = tool(params={"help": True})
+    print(resp.result["help"][:300])
     
-    # Test 1: Show help
-    print("\n1. Showing help...")
-    result, error = tool.execute({
-        "operation": "help"
-    })
-    if error:
-        print(f"Error: {error}")
+    # Test read
+    print("\n=== READ ===")
+    resp = tool(params={"operation": "read"})
+    print(f"Status: {resp.status}")
+    if resp.status == "success":
+        print(f"Content length: {resp.result['char_count']} chars")
+        print(f"Lines: {resp.result['line_count']}")
     else:
-        print(result)
-    
-    # Test 2: Read
-    print("\n2. Reading SOUL.md...")
-    result, error = tool.execute({
-        "operation": "read"
-    })
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(f"Content preview (first 200 chars):\n{result[:200]}...")
-    
-    print("\n" + "=" * 60)
-    print("Testing completed!")
-    print("=" * 60)
+        print(f"Error: {resp.error}")

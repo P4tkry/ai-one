@@ -28,11 +28,6 @@ def ask_question(
         encoding="utf-8"
     )
 
-    # print("\n=== SUBPROCESS DEBUG ===")
-    # print("RETURN CODE:", result.returncode)
-    # print("STDOUT:\n", result.stdout)
-    # print("STDERR:\n", result.stderr)
-    # print("=== END DEBUG ===\n")
 
     if result.returncode != 0:
         raise RuntimeError(

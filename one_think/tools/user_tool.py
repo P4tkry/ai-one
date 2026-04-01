@@ -1,104 +1,194 @@
-from one_think.tools import Tool
+"""
+UserTool - Full JSON migration
+Manages USER.md file with structured JSON responses
+"""
 import os
+from pathlib import Path
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+
+from one_think.tools.base import Tool, ToolResponse
 
 load_dotenv()
 
 
 class UserTool(Tool):
+    """Manages the USER.md file - user information and preferences."""
+    
     name = "user"
     description = "Manages the USER.md file - user information and preferences."
     
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.user_path = self._get_user_path()
     
-    def _get_user_path(self) -> str:
+    def _get_user_path(self) -> Path:
         """Get USER.md file path from .env or use default."""
-        user_path = os.getenv("USER_PATH")
-        
-        if not user_path:
-            # Default to USER.md in persistent directory
-            user_path = "persistent/USER.md"
-        
-        return user_path
+        user_path_str = os.getenv("USER_PATH", "persistent/USER.md")
+        return Path(user_path_str)
     
-    def _ensure_file_exists(self):
+    def _ensure_file_exists(self) -> None:
         """Ensure USER.md file exists, create if not."""
-        if not os.path.exists(self.user_path):
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(self.user_path) or '.', exist_ok=True)
+        if not self.user_path.exists():
+            # Create directory if needed
+            self.user_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Create file with default template
             default_content = """# USER - User Information
 This file stores important information about the user, any context that should be remembered across sessions.
 """
-            try:
-                with open(self.user_path, 'w', encoding='utf-8') as f:
-                    f.write(default_content)
-            except Exception as e:
-                raise Exception(f"Cannot create USER.md file: {e}")
+            self.user_path.write_text(default_content, encoding='utf-8')
     
-    def _read_user(self):
+    def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
+        """Execute user operation with JSON response."""
+        
+        # Validate required params
+        error = self.validate_required_params(params, required=["operation"])
+        if error:
+            return error
+        
+        operation = params["operation"]
+        
+        # Route to operation handlers
+        if operation == "read":
+            return self._read_user(request_id)
+        elif operation == "write":
+            return self._write_user(params, request_id)
+        elif operation == "append":
+            return self._append_user(params, request_id)
+        elif operation == "clear":
+            return self._clear_user(request_id)
+        else:
+            return self._create_error_response(
+                f"Unknown operation: '{operation}'. Valid operations: read, write, append, clear",
+                request_id=request_id
+            )
+    
+    def _read_user(self, request_id: Optional[str]) -> ToolResponse:
         """Read content from USER.md file."""
         try:
             self._ensure_file_exists()
-            
-            with open(self.user_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = self.user_path.read_text(encoding='utf-8')
             
             if not content.strip():
-                return "USER.md file is empty", ""
+                return self._create_success_response(
+                    result={
+                        "content": "",
+                        "message": "USER.md file is empty",
+                        "path": str(self.user_path),
+                        "size_bytes": 0
+                    },
+                    request_id=request_id
+                )
             
-            return content, ""
+            return self._create_success_response(
+                result={
+                    "content": content,
+                    "path": str(self.user_path),
+                    "size_bytes": len(content),
+                    "lines": len(content.splitlines())
+                },
+                request_id=request_id
+            )
         except Exception as e:
-            return "", f"Error reading USER.md: {e}"
+            return self._create_error_response(
+                f"Error reading USER.md: {e}",
+                request_id=request_id
+            )
     
-    def _write_user(self, content: str):
+    def _write_user(self, params: Dict[str, Any], request_id: Optional[str]) -> ToolResponse:
         """Write content to USER.md file (overwrite)."""
+        content = params.get("content")
+        
+        if not content:
+            return self._create_error_response(
+                "Missing required parameter: 'content'",
+                request_id=request_id
+            )
+        
         try:
-            if not content:
-                return "", "Content cannot be empty for 'write' operation"
+            # Ensure directory exists
+            self.user_path.parent.mkdir(parents=True, exist_ok=True)
             
-            with open(self.user_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # Write content
+            self.user_path.write_text(content, encoding='utf-8')
             
-            lines_count = len(content.split('\n'))
+            lines_count = len(content.splitlines())
             chars_count = len(content)
             
-            return f"Successfully wrote to USER.md ({lines_count} lines, {chars_count} characters)", ""
+            return self._create_success_response(
+                result={
+                    "message": f"Successfully wrote to USER.md",
+                    "path": str(self.user_path),
+                    "lines": lines_count,
+                    "characters": chars_count
+                },
+                request_id=request_id
+            )
         except Exception as e:
-            return "", f"Error writing to USER.md: {e}"
+            return self._create_error_response(
+                f"Error writing to USER.md: {e}",
+                request_id=request_id
+            )
     
-    def _append_user(self, content: str):
+    def _append_user(self, params: Dict[str, Any], request_id: Optional[str]) -> ToolResponse:
         """Append content to USER.md file."""
+        content = params.get("content")
+        
+        if not content:
+            return self._create_error_response(
+                "Missing required parameter: 'content'",
+                request_id=request_id
+            )
+        
         try:
-            if not content:
-                return "", "Content cannot be empty for 'append' operation"
-            
             self._ensure_file_exists()
             
-            with open(self.user_path, 'a', encoding='utf-8') as f:
-                # Add newline if file doesn't end with one
-                f.write('\n' + content if not content.startswith('\n') else content)
+            # Read existing content
+            existing = self.user_path.read_text(encoding='utf-8')
             
-            return f"Successfully appended to USER.md ({len(content)} characters)", ""
+            # Add newline if needed
+            if existing and not existing.endswith('\n'):
+                content = '\n' + content
+            
+            # Append
+            self.user_path.write_text(existing + content, encoding='utf-8')
+            
+            return self._create_success_response(
+                result={
+                    "message": f"Successfully appended to USER.md",
+                    "path": str(self.user_path),
+                    "appended_characters": len(content)
+                },
+                request_id=request_id
+            )
         except Exception as e:
-            return "", f"Error appending to USER.md: {e}"
+            return self._create_error_response(
+                f"Error appending to USER.md: {e}",
+                request_id=request_id
+            )
     
-    def _clear_user(self):
+    def _clear_user(self, request_id: Optional[str]) -> ToolResponse:
         """Clear USER.md file content."""
         try:
-            with open(self.user_path, 'w', encoding='utf-8') as f:
-                f.write("")
+            self.user_path.write_text("", encoding='utf-8')
             
-            return "Successfully cleared USER.md", ""
+            return self._create_success_response(
+                result={
+                    "message": "Successfully cleared USER.md",
+                    "path": str(self.user_path)
+                },
+                request_id=request_id
+            )
         except Exception as e:
-            return "", f"Error clearing USER.md: {e}"
+            return self._create_error_response(
+                f"Error clearing USER.md: {e}",
+                request_id=request_id
+            )
     
-    def _show_help(self):
-        """Show help information for the User tool."""
-        help_text = """User Tool - USER.md Management
+    def get_help(self) -> str:
+        """Return comprehensive help text."""
+        return """User Tool - USER.md Management
 
 DESCRIPTION:
     Manages the USER.md file containing user information and preferences.
@@ -109,10 +199,9 @@ OPERATIONS:
     write   - Write new content to USER.md (overwrites existing content)
     append  - Append content to the end of USER.md
     clear   - Clear all content from USER.md
-    help    - Show this help message
 
-ARGUMENTS:
-    operation (required) - The operation to perform
+PARAMETERS:
+    operation (required) - The operation to perform: read, write, append, clear
     content (optional)   - Content for write/append operations
 
 EXAMPLES:
@@ -127,9 +216,6 @@ EXAMPLES:
     
     4. Clear all information:
        {"operation": "clear"}
-    
-    5. Show help:
-       {"operation": "help"}
 
 USER.MD PURPOSE:
     - Store user personal information
@@ -151,6 +237,28 @@ CONFIGURATION:
     Set USER_PATH in .env file:
         USER_PATH=persistent/USER.md
 
+RESPONSE FORMAT:
+    Success:
+        {
+            "status": "success",
+            "result": {
+                "content": "...",      // for read operation
+                "message": "...",      // for write/append/clear
+                "path": "...",
+                "lines": N,            // number of lines
+                "characters": N        // number of characters
+            }
+        }
+    
+    Error:
+        {
+            "status": "error",
+            "error": {
+                "message": "Error description",
+                "type": "ToolExecutionError"
+            }
+        }
+
 NOTES:
     - File is automatically created with default template if it doesn't exist
     - Use 'write' to completely replace content
@@ -158,121 +266,3 @@ NOTES:
     - USER.md is stored in persistent/ (not committed to git for privacy)
     - Keep sensitive personal information minimal
 """
-        return help_text, ""
-    
-    def execute(self, arguments: dict[str, str] = None):
-        """Execute the USER operation."""
-        if arguments is None:
-            return "", "No arguments provided"
-        
-        # Check for help first
-        if arguments.get("help"):
-            return self._show_help()
-        
-        operation = arguments.get("operation")
-        if not operation:
-            return "", "Missing required argument: 'operation'"
-        
-        # Execute operation
-        if operation == "read":
-            return self._read_user()
-        
-        elif operation == "write":
-            content = arguments.get("content")
-            if content is None:
-                return "", "Missing required argument for 'write': content"
-            return self._write_user(content)
-        
-        elif operation == "append":
-            content = arguments.get("content")
-            if content is None:
-                return "", "Missing required argument for 'append': content"
-            return self._append_user(content)
-        
-        elif operation == "clear":
-            return self._clear_user()
-        
-        elif operation == "help":
-            return self._show_help()
-        
-        else:
-            return "", f"Unknown operation: '{operation}'. Valid operations: read, write, append, clear, help"
-
-
-if __name__ == "__main__":
-    # Test the tool
-    tool = UserTool()
-    
-    print("=" * 60)
-    print("Testing User Tool")
-    print("=" * 60)
-    
-    # Test 1: Show help
-    print("\n1. Showing help...")
-    result, error = tool.execute({
-        "operation": "help"
-    })
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(result)
-    
-    # Test 2: Read (will create default if not exists)
-    print("\n2. Reading USER.md...")
-    result, error = tool.execute({
-        "operation": "read"
-    })
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(f"Content preview (first 300 chars):\n{result[:300]}...")
-    
-    # Test 3: Write custom content
-    print("\n3. Writing custom user info...")
-    custom_content = """# USER - User Information
-
-## Personal Information
-
-- Name: John Developer
-- Role: Software Engineer
-- Location: Remote
-
-## Technical Background
-
-- Programming Languages: Python, JavaScript, Go
-- Frameworks: FastAPI, React, Django
-- Areas of Expertise: Backend Development, APIs, Database Design
-
-## Current Projects
-
-- AI-ONE: Personal AI assistant system
-- Focus: Building tools for automation
-
-## Working Style
-
-- Preferred workflow: Agile, iterative development
-- Communication: Direct and concise
-- Availability: Mon-Fri, 9AM-6PM UTC
-"""
-    result, error = tool.execute({
-        "operation": "write",
-        "content": custom_content
-    })
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(f"Result: {result}")
-    
-    # Test 4: Read updated content
-    print("\n4. Reading updated USER.md...")
-    result, error = tool.execute({
-        "operation": "read"
-    })
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(f"Total length: {len(result)} characters")
-    
-    print("\n" + "=" * 60)
-    print("Testing completed!")
-    print("=" * 60)

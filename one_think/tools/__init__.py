@@ -1,19 +1,19 @@
-from typing import Tuple
+"""
+Tools module for AI-ONE.
 
+Provides base Tool interface and all available tools.
+All tools return strict JSON format via ToolResponse.
+"""
 
-class Tool:
-    description = ""
-    name = ""
-    def __init__(self):
-        pass
+from one_think.tools.base import Tool, ToolResponse, ToolError, ToolLegacy
 
-    def execute(self, arguments: dict[str, str] = None)-> Tuple[str, str]:
-        pass
+# Import existing tools (they'll need migration)
+# For now, we'll export both new and legacy interfaces
 
-    def get_full_information(self):
-        pass
-
-    def __str__(self):
-        return f'''Tool: {self.name} - {self.description} | argument "help": true for more details'''
-
+__all__ = [
+    'Tool',
+    'ToolResponse',
+    'ToolError',
+    'ToolLegacy',
+]
 

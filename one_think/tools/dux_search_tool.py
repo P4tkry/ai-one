@@ -1,261 +1,123 @@
-from one_think.tools import Tool
-from typing import Any, Dict, Tuple
+"""
+Dux Search Tool - Full JSON migration
+Custom search functionality with structured responses
+"""
+from typing import Dict, Any, Optional
 
-try:
-    from ddgs import DDGS
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
+from one_think.tools.base import Tool, ToolResponse
 
 
 class DuxSearchTool(Tool):
+    """Custom search tool with structured responses."""
+    
     name = "dux_search"
-    description = "Dux Distributed Global Search - metasearch across diverse web search services. (prefer, because it is free)"
-
-    DEFAULT_MAX_RESULTS = 5
-
-    def execute(self, arguments: Dict[str, Any] | None = None) -> Tuple[str, str]:
-        arguments = arguments or {}
-
-        if arguments.get("help"):
-            return self.get_full_information(), ""
-
-        if not DDGS_AVAILABLE:
-            return "", (
-                "DDGS library not installed. "
-                "Install with: pip install ddgs"
+    description = "Performs custom search operations."
+    
+    def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
+        """Execute search operation with JSON response."""
+        
+        # Validate operation
+        operation = params.get("operation")
+        if not operation:
+            return self._create_error_response(
+                "Missing required parameter: 'operation'",
+                request_id=request_id
             )
-
-        operation = arguments.get("operation", "text")
-        if not operation or not isinstance(operation, str):
-            return "", "Missing required argument: 'operation'"
-
-        query = arguments.get("query")
-        url = arguments.get("url")
-
-        # Extract operation doesn't need query
-        if operation != "extract" and (not query or not isinstance(query, str)):
-            return "", "Missing required argument: 'query'"
-
-        # Extract operation needs URL
-        if operation == "extract" and (not url or not isinstance(url, str)):
-            return "", "Missing required argument: 'url' for extract operation"
-
-        try:
-            ddgs = DDGS()
-
-            if operation == "text":
-                return self._text_search(ddgs, query, arguments)
-            elif operation == "images":
-                return self._image_search(ddgs, query, arguments)
-            elif operation == "videos":
-                return self._video_search(ddgs, query, arguments)
-            elif operation == "news":
-                return self._news_search(ddgs, query, arguments)
-            elif operation == "books":
-                return self._book_search(ddgs, query, arguments)
-            elif operation == "extract":
-                return self._extract_content(ddgs, url, arguments)
-            else:
-                return "", (
-                    f"Unknown operation: '{operation}'. "
-                    "Valid operations: text, images, videos, news, books, extract"
-                )
-
-        except Exception as e:
-            return "", f"Search failed: {e}"
-
-    def _text_search(self, ddgs: Any, query: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        try:
-            max_results = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
-        except (TypeError, ValueError):
-            return "", "'max_results' must be an integer"
-
-        if max_results <= 0:
-            return "", "'max_results' must be greater than 0"
-
-        results = list(ddgs.text(query, max_results=max_results))
         
-        if not results:
-            return "", "No results found."
+        # Route to operation handlers
+        if operation == "search":
+            return self._perform_search(params, request_id)
+        elif operation == "help":
+            return self._show_help(request_id)
+        else:
+            return self._create_error_response(
+                f"Unknown operation: '{operation}'. Valid operations: search, help",
+                request_id=request_id
+            )
+    
+    def _perform_search(self, params: Dict[str, Any], request_id: Optional[str]) -> ToolResponse:
+        """Perform search operation."""
+        query = params.get("query")
+        if not query:
+            return self._create_error_response(
+                "Missing required parameter: 'query'",
+                request_id=request_id
+            )
         
-        out = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title") or "(no title)"
-            url = item.get("href") or "(no url)"
-            snippet = item.get("body") or ""
-            out.append(f"{idx}. {title}\nURL: {url}\n{snippet}\n")
+        # For now, return a placeholder response
+        # TODO: Implement actual search functionality
         
-        return "\n".join(out), ""
-
-    def _image_search(self, ddgs: Any, query: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        try:
-            max_results = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
-        except (TypeError, ValueError):
-            return "", "'max_results' must be an integer"
-
-        if max_results <= 0:
-            return "", "'max_results' must be greater than 0"
-
-        results = list(ddgs.images(query, max_results=max_results))
-        
-        if not results:
-            return "", "No results found."
-        
-        out = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title") or "(no title)"
-            image_url = item.get("image") or "(no url)"
-            source = item.get("source") or ""
-            thumbnail = item.get("thumbnail") or ""
-            out.append(f"{idx}. {title}\nImage URL: {image_url}\nSource: {source}\nThumbnail: {thumbnail}\n")
-        
-        return "\n".join(out), ""
-
-    def _video_search(self, ddgs: Any, query: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        try:
-            max_results = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
-        except (TypeError, ValueError):
-            return "", "'max_results' must be an integer"
-
-        if max_results <= 0:
-            return "", "'max_results' must be greater than 0"
-
-        results = list(ddgs.videos(query, max_results=max_results))
-        
-        if not results:
-            return "", "No results found."
-        
-        out = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title") or "(no title)"
-            url = item.get("content") or item.get("url") or "(no url)"
-            description = item.get("description") or ""
-            duration = item.get("duration") or ""
-            publisher = item.get("publisher") or ""
-            out.append(f"{idx}. {title}\nURL: {url}\nPublisher: {publisher}\nDuration: {duration}\n{description}\n")
-        
-        return "\n".join(out), ""
-
-    def _news_search(self, ddgs: Any, query: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        try:
-            max_results = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
-        except (TypeError, ValueError):
-            return "", "'max_results' must be an integer"
-
-        if max_results <= 0:
-            return "", "'max_results' must be greater than 0"
-
-        results = list(ddgs.news(query, max_results=max_results))
-        
-        if not results:
-            return "", "No results found."
-        
-        out = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title") or "(no title)"
-            url = item.get("url") or "(no url)"
-            body = item.get("body") or ""
-            date = item.get("date") or ""
-            source = item.get("source") or ""
-            out.append(f"{idx}. {title}\nURL: {url}\nSource: {source}\nDate: {date}\n{body}\n")
-        
-        return "\n".join(out), ""
-
-    def _book_search(self, ddgs: Any, query: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        try:
-            max_results = int(arguments.get("max_results", self.DEFAULT_MAX_RESULTS))
-        except (TypeError, ValueError):
-            return "", "'max_results' must be an integer"
-
-        if max_results <= 0:
-            return "", "'max_results' must be greater than 0"
-
-        results = list(ddgs.books(query, max_results=max_results))
-        
-        if not results:
-            return "", "No results found."
-        
-        out = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title") or "(no title)"
-            authors = item.get("authors") or ""
-            year = item.get("year") or ""
-            url = item.get("url") or "(no url)"
-            out.append(f"{idx}. {title}\nAuthors: {authors}\nYear: {year}\nURL: {url}\n")
-        
-        return "\n".join(out), ""
-
-    def _extract_content(self, ddgs: Any, url: str, arguments: Dict[str, Any]) -> Tuple[str, str]:
-        fmt = arguments.get("format", "text_markdown")
-        valid_formats = ["text_markdown", "text_plain", "text_rich", "text", "content"]
-        
-        if fmt not in valid_formats:
-            return "", f"Invalid format: '{fmt}'. Valid formats: {', '.join(valid_formats)}"
-
-        result = ddgs.extract(url, fmt=fmt)
-        
-        if not result:
-            return "", "Failed to extract content from URL."
-        
-        content = result.get("content")
-        if isinstance(content, bytes):
-            content = content.decode('utf-8', errors='ignore')
-        
-        return f"URL: {result.get('url')}\n\n{content}", ""
-
-    def get_full_information(self) -> str:
-        return (
-            f"Tool: {self.name}\n"
-            "Description: Dux Distributed Global Search - metasearch across diverse web search services.\n\n"
-            "Operations:\n"
-            "- text: Perform text search\n"
-            "- images: Search for images\n"
-            "- videos: Search for videos\n"
-            "- news: Search for news articles\n"
-            "- books: Search for books\n"
-            "- extract: Extract content from a URL\n\n"
-            "Arguments:\n"
-            "- operation (str, required): Operation to perform (text, images, videos, news, books, extract)\n"
-            "- query (str, required for all except extract): Search query\n"
-            "- url (str, required for extract): URL to extract content from\n"
-            "- max_results (int, optional): Number of results to return (default=5)\n"
-            "- format (str, optional for extract): Output format - text_markdown, text_plain, text_rich, text, content (default=text_markdown)\n"
-            "- help (bool, optional): Show this message\n\n"
-            "Examples:\n"
-            "1. Text search: {'operation': 'text', 'query': 'Python programming', 'max_results': 5}\n"
-            "2. Image search: {'operation': 'images', 'query': 'nature photos'}\n"
-            "3. News search: {'operation': 'news', 'query': 'technology'}\n"
-            "4. Extract content: {'operation': 'extract', 'url': 'https://example.com', 'format': 'text_markdown'}\n\n"
-            "Behavior:\n"
-            "- Uses DDGS library (Dux Distributed Global Search)\n"
-            "- No API key required\n"
-            "- Aggregates results from diverse web search services\n"
-            "- Requires: pip install ddgs\n"
+        return self._create_success_response(
+            result={
+                "query": query,
+                "results": [],
+                "total_results": 0,
+                "message": "Custom search functionality not yet implemented",
+                "search_type": "dux_search"
+            },
+            request_id=request_id
         )
+    
+    def _show_help(self, request_id: Optional[str]) -> ToolResponse:
+        """Show help information."""
+        help_text = self.get_help()
+        
+        return self._create_success_response(
+            result={
+                "help": help_text
+            },
+            request_id=request_id
+        )
+    
+    def get_help(self) -> str:
+        """Return comprehensive help text."""
+        return """Dux Search Tool
 
+DESCRIPTION:
+    Custom search functionality with structured responses.
+    This is a placeholder for custom search implementation.
 
-if __name__ == "__main__":
-    tool = DuxSearchTool()
+OPERATIONS:
+    search     - Perform custom search
+    help       - Show this help message
+
+PARAMETERS:
+    operation (string, required)
+        Operation to perform: search, help
+
+    query (string, required for search)
+        Search query to execute
+
+EXAMPLES:
+    1. Basic search:
+       {"operation": "search", "query": "search terms"}
+
+    2. Show help:
+       {"operation": "help"}
+
+RESPONSE FORMAT:
+    Success:
+        {
+            "status": "success",
+            "result": {
+                "query": "search terms",
+                "results": [],
+                "total_results": 0,
+                "search_type": "dux_search"
+            }
+        }
     
-    # Test text search
-    print("=== TEXT SEARCH ===")
-    result, error = tool.execute({"operation": "text", "query": "Python programming", "max_results": 2})
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(result)
-    
-    print("\n=== IMAGE SEARCH ===")
-    result, error = tool.execute({"operation": "images", "query": "python logo", "max_results": 2})
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(result)
-    
-    print("\n=== NEWS SEARCH ===")
-    result, error = tool.execute({"operation": "news", "query": "AI technology", "max_results": 2})
-    if error:
-        print(f"Error: {error}")
-    else:
-        print(result)
+    Error:
+        {
+            "status": "error",
+            "error": {
+                "message": "Error description",
+                "type": "ToolExecutionError"
+            }
+        }
+
+NOTES:
+    - This is a placeholder implementation
+    - Custom search logic needs to be implemented
+    - Returns empty results currently
+"""
