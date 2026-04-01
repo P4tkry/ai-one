@@ -11,9 +11,12 @@ Protocol supports:
 """
 
 import json
+import logging
 from enum import Enum
 from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class ResponseType(str, Enum):
@@ -133,14 +136,16 @@ class ProtocolParser:
         Raises:
             ValueError: If response is invalid JSON or doesn't match protocol
         """
-        # Parse JSON
+        # Parse JSON with fallback to plain text
         try:
             data = json.loads(raw_response)
         except json.JSONDecodeError as e:
-            raise ValueError(
-                f"LLM response is not valid JSON: {e}\n"
-                f"Raw response:\n{raw_response[:500]}"
-            ) from e
+            # Fallback: treat as plain text response
+            logger.warning(f"LLM returned plain text instead of JSON: {e}")
+            logger.debug(f"Raw response: {raw_response[:200]}...")
+            
+            # Wrap plain text in Response format
+            return Response(content=raw_response.strip())
         
         # Validate is dict
         if not isinstance(data, dict):

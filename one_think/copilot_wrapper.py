@@ -184,13 +184,24 @@ class CopilotWrapper:
         return self._sessions[session_id]
     
     def _get_default_system_prompt(self) -> str:
-        """Get default system prompt for Copilot."""
+        """Get default system prompt for Copilot with AI-ONE protocol."""
         return (
-            "You are GitHub Copilot, a helpful AI assistant. "
-            "You can help with coding, writing, analysis, and various tasks. "
-            "You have access to tools that can help you provide better answers. "
-            "When you need to use tools, respond with a JSON tool request. "
-            "Otherwise, respond with helpful and accurate information."
+            "You are GitHub Copilot integrated with AI-ONE tool system. "
+            
+            "CRITICAL: Always respond with valid JSON in one of these formats:\n"
+            
+            "1. For normal responses:\n"
+            '{"type": "response", "content": "your helpful answer here"}\n'
+            
+            "2. For tool requests:\n"
+            '{"type": "tool_request", "tools": [{"tool_name": "tool_name", "params": {...}, "id": "req_1"}]}\n'
+            
+            "3. For system refresh:\n"
+            '{"type": "system_refresh_request", "reason": "context full or need guidelines"}\n'
+            
+            "Available tools: user, memory, python_executor, web_search, filesystem, and others.\n"
+            "Use tools when you need to gather information, execute code, or perform actions.\n"
+            "Always provide helpful, accurate responses in the specified JSON format."
         )
     
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:

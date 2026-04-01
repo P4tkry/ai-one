@@ -342,25 +342,35 @@ class CopilotProvider(LLMProvider):
     
     def _extract_current_prompt(self, messages: List[ProviderMessage]) -> str:
         """
-        Extract current user prompt from messages.
+        Extract current prompt from messages, including system prompt if present.
         
-        Since Copilot CLI handles conversation history via --resume,
-        we only need to send the current user prompt, not entire conversation.
+        For first message in session, we need to include system prompt.
+        For subsequent messages, Copilot CLI handles context via --resume.
         
         Args:
             messages: Provider messages
             
         Returns:
-            Current user prompt
+            Formatted prompt for Copilot CLI
         """
-        # Find the latest user message
-        for message in reversed(messages):
-            if message.role == "user":
-                return message.content
+        # Check if we have system prompt (indicates first message)
+        system_message = None
+        user_message = None
         
-        # Fallback: if no user message, format all messages
-        # This handles cases where there are only system/assistant messages
-        return self._format_messages_for_copilot(messages)
+        for message in messages:
+            if message.role == "system":
+                system_message = message
+            elif message.role == "user":
+                user_message = message
+        
+        # If we have system prompt, combine it with user message
+        if system_message and user_message:
+            return f"{system_message.content}\n\nUser: {user_message.content}"
+        elif user_message:
+            return user_message.content
+        else:
+            # Fallback: format all messages
+            return self._format_messages_for_copilot(messages)
     
     def _format_messages_for_copilot(self, messages: List[ProviderMessage]) -> str:
         """
