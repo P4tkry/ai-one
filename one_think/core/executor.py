@@ -108,7 +108,7 @@ class Executor:
         self, 
         tool_registry: Optional[ToolRegistry] = None,
         protocol: Optional[Protocol] = None,
-        llm_provider: Optional[Callable] = None,
+        llm_provider: Optional[Union[Callable, 'LLMProvider']] = None,
         max_tool_iterations: int = 5
     ):
         """
@@ -117,7 +117,7 @@ class Executor:
         Args:
             tool_registry: Registry for tool discovery and dispatch
             protocol: Protocol parser for LLM responses  
-            llm_provider: Function to send messages to LLM (provider abstraction)
+            llm_provider: Function OR Provider instance to send messages to LLM
             max_tool_iterations: Maximum number of tool call iterations per request
         """
         self.tool_registry = tool_registry if tool_registry is not None else global_registry
@@ -318,13 +318,21 @@ class Executor:
             # Convert session to provider format
             messages = self._format_messages_for_provider(session)
             
-            # Call provider
-            response = self.llm_provider(messages)
-            
-            if not response or not isinstance(response, str):
-                raise LLMProviderError(f"Invalid provider response: {type(response)}")
+            # Check if provider is a Provider instance or function
+            from one_think.providers import LLMProvider as BaseProvider
+            if isinstance(self.llm_provider, BaseProvider):
+                # Use Provider interface
+                provider_messages = self.llm_provider.format_messages(messages)
+                response = self.llm_provider.send_messages(provider_messages)
+                return response.content
+            else:
+                # Use legacy function interface
+                response = self.llm_provider(messages)
                 
-            return response
+                if not response or not isinstance(response, str):
+                    raise LLMProviderError(f"Invalid provider response: {type(response)}")
+                    
+                return response
             
         except Exception as e:
             raise LLMProviderError(f"Provider call failed: {str(e)}") from e
@@ -501,10 +509,11 @@ class Executor:
         refresh_msg = SystemRefreshMessage(content=refresh_content)
         session.add_message(refresh_msg)
     
-    def set_llm_provider(self, provider: Callable):
-        """Set the LLM provider function."""
+    def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):
+        """Set the LLM provider function or Provider instance."""
         self.llm_provider = provider
-        logger.info("LLM provider configured")
+        provider_type = "Provider instance" if hasattr(provider, 'send_messages') else "function"
+        logger.info(f"LLM provider configured: {provider_type}")
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get executor metrics and statistics."""
