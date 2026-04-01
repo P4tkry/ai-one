@@ -271,3 +271,9 @@ def parse_llm_response(raw_response: str) -> ProtocolResponse:
         ValueError: If response is invalid
     """
     return ProtocolParser.parse(raw_response)
+
+
+# Compatibility aliases for Executor
+Protocol = ProtocolParser
+ProtocolParseResult = ProtocolResponse
+LLMResponse = Response

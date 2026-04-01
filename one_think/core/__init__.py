@@ -2,7 +2,7 @@
 Core module for AI-ONE conversation management.
 
 This module provides the foundational components for managing conversations,
-messages, sessions, and protocol handling.
+messages, sessions, protocol handling, and execution engine.
 """
 
 from one_think.core.message import (
@@ -27,9 +27,21 @@ from one_think.core.protocol import (
     ResponseType,
     ProtocolResponse,
     parse_llm_response,
+    Protocol,
+    ProtocolParseResult,
+    LLMResponse,
 )
 
 from one_think.core.session import Session
+
+from one_think.core.executor import (
+    Executor,
+    ExecutionResult,
+    ExecutionStatus,
+    ExecutorError,
+    ToolDispatchError,
+    LLMProviderError,
+)
 
 __all__ = [
     # Message types
@@ -53,7 +65,18 @@ __all__ = [
     'ResponseType',
     'ProtocolResponse',
     'parse_llm_response',
+    'Protocol',
+    'ProtocolParseResult',
+    'LLMResponse',
     
     # Session management
     'Session',
+    
+    # Execution engine
+    'Executor',
+    'ExecutionResult',
+    'ExecutionStatus',
+    'ExecutorError',
+    'ToolDispatchError',
+    'LLMProviderError',
 ]
