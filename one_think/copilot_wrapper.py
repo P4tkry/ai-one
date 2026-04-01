@@ -152,8 +152,8 @@ class CopilotWrapper:
             result = self.executor.execute_request(
                 user_input=prompt,
                 session=session,
-                system_prompt=effective_system_prompt if not session.history else None,
-                request_id=f"copilot_{session_id}_{len(session.history)}"
+                system_prompt=effective_system_prompt if session.stats["requests_count"] == 0 else None,
+                request_id=f"copilot_{session_id}_{session.stats['requests_count']}"
             )
             
             # Log execution details
@@ -207,10 +207,16 @@ class CopilotWrapper:
             return None
         
         session = self._sessions[session_id]
+        session_summary = session.get_summary()
         return {
-            "session_id": session.id,
+            "session_id": session_summary["session_id"],
             "created_at": session.created_at.isoformat(),
-            "message_count": len(session.history),
+            "message_count": session_summary["requests"],  # Requests instead of messages
+            "tool_calls": session_summary["tool_calls"],
+            "errors": session_summary["errors"],
+            "duration_minutes": session_summary["duration_minutes"],
+            "last_model": session_summary["last_model"],
+            "is_active": session_summary["is_active"],
             "metadata": session.metadata
         }
     

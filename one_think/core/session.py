@@ -1,294 +1,180 @@
 """
-Session management for AI-ONE conversations.
+Session management for AI-ONE conversations with GitHub Copilot CLI.
 
-Session tracks:
-- Conversation history (all messages)
-- System prompt state
-- Session metadata
-- Message addition and retrieval
+Session provides thin wrapper around Copilot CLI's native session management.
+Instead of duplicating conversation history, we leverage Copilot's --resume functionality.
 
-This is the central state manager for a conversation.
+Key changes:
+- Session.id maps directly to Copilot CLI --resume session_id
+- No message history storage (Copilot CLI handles this)
+- Focus on metadata, statistics, and session lifecycle
+- Direct integration with copilot --resume={session_id}
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 import uuid
-from one_think.core.message import (
-    Message,
-    AnyMessage,
-    SystemMessage,
-    UserMessage,
-    AssistantMessage,
-    ToolResultMessage,
-    SystemRefreshMessage,
-    MessageType,
-)
 
 
 class Session:
     """
-    Manages state for a single conversation session.
+    Thin wrapper for GitHub Copilot CLI sessions.
     
-    Responsibilities:
-    - Track conversation history
-    - Manage system prompt state
-    - Provide message querying and filtering
-    - Handle session lifecycle
+    This class doesn't store conversation history - that's handled by 
+    Copilot CLI via --resume={session_id}. Instead, it manages:
+    - Session metadata and preferences
+    - Usage statistics and metrics  
+    - Session lifecycle (creation, cleanup)
+    - Mapping between AI-ONE and Copilot CLI sessions
     
     Attributes:
-        id: Unique session identifier
+        id: Session ID that maps to Copilot CLI --resume parameter
         created_at: Session creation timestamp
-        history: List of all messages in conversation order
-        metadata: Optional session metadata
+        metadata: Session metadata (user preferences, config overrides)
+        stats: Session usage statistics
+        last_activity: Last request timestamp
     """
     
     def __init__(
         self,
         session_id: Optional[str] = None,
-        metadata: Optional[dict] = None
+        metadata: Optional[Dict[str, Any]] = None
     ):
         """
-        Initialize a new conversation session.
+        Initialize session wrapper.
         
         Args:
-            session_id: Optional custom session ID (generates UUID if not provided)
-            metadata: Optional session metadata (e.g., user_id, source)
+            session_id: Custom session ID (generates UUID if not provided)
+                       This ID will be passed to copilot --resume={session_id}
+            metadata: Session metadata (user preferences, config, etc.)
         """
         self.id: str = session_id or self._generate_session_id()
         self.created_at: datetime = datetime.now(timezone.utc)
-        self.history: list[AnyMessage] = []
-        self.metadata: dict = metadata or {}
+        self.metadata: Dict[str, Any] = metadata or {}
         
-        # Track whether system prompt has been sent
-        self._system_prompt_sent: bool = False
-        self._last_system_refresh: Optional[datetime] = None
+        # Usage statistics
+        self.stats = {
+            "requests_count": 0,
+            "tool_calls_count": 0,
+            "total_tokens_estimated": 0,
+            "errors_count": 0,
+            "last_model_used": None,
+            "session_duration_seconds": 0
+        }
+        
+        # Session state
+        self.last_activity: datetime = self.created_at
+        self.is_active: bool = True
+        
+        # Copilot CLI integration
+        self.copilot_session_id: str = self.id  # Direct mapping
     
     @staticmethod
     def _generate_session_id() -> str:
-        """Generate a unique session ID."""
-        return f"session_{uuid.uuid4().hex[:16]}"
+        """Generate a unique session ID compatible with Copilot CLI."""
+        return str(uuid.uuid4())
     
-    def add_message(self, message: AnyMessage) -> None:
+    def record_request(
+        self, 
+        model: Optional[str] = None, 
+        tool_calls: int = 0,
+        estimated_tokens: int = 0,
+        had_error: bool = False
+    ) -> None:
         """
-        Add a message to conversation history.
+        Record request statistics.
         
         Args:
-            message: Message to add
+            model: LLM model used
+            tool_calls: Number of tool calls in request
+            estimated_tokens: Estimated token usage
+            had_error: Whether request had errors
         """
-        if not isinstance(message, Message):
-            raise TypeError(f"Expected Message instance, got {type(message)}")
+        self.last_activity = datetime.now(timezone.utc)
+        self.stats["requests_count"] += 1
+        self.stats["tool_calls_count"] += tool_calls
+        self.stats["total_tokens_estimated"] += estimated_tokens
         
-        self.history.append(message)
-        
-        # Track system prompt state
-        if isinstance(message, SystemMessage):
-            self._system_prompt_sent = True
-        
-        if isinstance(message, SystemRefreshMessage):
-            self._last_system_refresh = message.timestamp
+        if had_error:
+            self.stats["errors_count"] += 1
+            
+        if model:
+            self.stats["last_model_used"] = model
+            
+        # Update session duration
+        duration = (self.last_activity - self.created_at).total_seconds()
+        self.stats["session_duration_seconds"] = duration
     
-    def add_user_message(self, content: str, **kwargs) -> UserMessage:
+    def get_copilot_session_id(self) -> str:
+        """Get session ID for Copilot CLI --resume parameter."""
+        return self.copilot_session_id
+    
+    def set_metadata(self, key: str, value: Any) -> None:
+        """Set session metadata."""
+        self.metadata[key] = value
+    
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        """Get session metadata."""
+        return self.metadata.get(key, default)
+    
+    def is_expired(self, max_idle_hours: float = 24.0) -> bool:
         """
-        Convenience method to add a user message.
+        Check if session is expired based on last activity.
         
         Args:
-            content: User message content
-            **kwargs: Additional message fields (metadata, etc.)
+            max_idle_hours: Maximum idle time before expiration
             
         Returns:
-            Created UserMessage
+            True if session is expired
         """
-        msg = UserMessage(content=content, **kwargs)
-        self.add_message(msg)
-        return msg
-    
-    def add_assistant_message(self, content: str, **kwargs) -> AssistantMessage:
-        """
-        Convenience method to add an assistant message.
-        
-        Args:
-            content: Assistant response content
-            **kwargs: Additional message fields
-            
-        Returns:
-            Created AssistantMessage
-        """
-        msg = AssistantMessage(content=content, **kwargs)
-        self.add_message(msg)
-        return msg
-    
-    def add_tool_result(
-        self,
-        content: str,
-        tool_name: str,
-        status: str,
-        request_id: Optional[str] = None,
-        **kwargs
-    ) -> ToolResultMessage:
-        """
-        Convenience method to add a tool result message.
-        
-        Args:
-            content: Tool result JSON content
-            tool_name: Name of tool that was executed
-            status: "success" or "error"
-            request_id: Optional request identifier
-            **kwargs: Additional message fields
-            
-        Returns:
-            Created ToolResultMessage
-        """
-        msg = ToolResultMessage(
-            content=content,
-            tool_name=tool_name,
-            status=status,
-            request_id=request_id,
-            **kwargs
-        )
-        self.add_message(msg)
-        return msg
-    
-    def get_history(
-        self,
-        message_type: Optional[MessageType] = None,
-        limit: Optional[int] = None
-    ) -> list[AnyMessage]:
-        """
-        Get conversation history with optional filtering.
-        
-        Args:
-            message_type: Optional filter by message type
-            limit: Optional limit on number of messages (most recent)
-            
-        Returns:
-            List of messages (filtered and/or limited)
-        """
-        messages = self.history
-        
-        # Filter by type if specified
-        if message_type is not None:
-            messages = [m for m in messages if m.type == message_type]
-        
-        # Apply limit if specified (most recent)
-        if limit is not None and limit > 0:
-            messages = messages[-limit:]
-        
-        return messages
-    
-    def get_last_message(self, message_type: Optional[MessageType] = None) -> Optional[AnyMessage]:
-        """
-        Get the last message in history.
-        
-        Args:
-            message_type: Optional filter by type
-            
-        Returns:
-            Last message or None if no messages
-        """
-        messages = self.get_history(message_type=message_type)
-        return messages[-1] if messages else None
-    
-    def get_user_messages(self, limit: Optional[int] = None) -> list[UserMessage]:
-        """Get all user messages."""
-        return self.get_history(message_type=MessageType.USER, limit=limit)
-    
-    def get_assistant_messages(self, limit: Optional[int] = None) -> list[AssistantMessage]:
-        """Get all assistant messages."""
-        return self.get_history(message_type=MessageType.ASSISTANT, limit=limit)
-    
-    def get_tool_results(self, limit: Optional[int] = None) -> list[ToolResultMessage]:
-        """Get all tool result messages."""
-        return self.get_history(message_type=MessageType.TOOL_RESULT, limit=limit)
-    
-    def is_system_prompt_sent(self) -> bool:
-        """Check if system prompt has been sent in this session."""
-        return self._system_prompt_sent
-    
-    def get_last_system_refresh(self) -> Optional[datetime]:
-        """Get timestamp of last system prompt refresh."""
-        return self._last_system_refresh
-    
-    def should_refresh_system_prompt(self, max_messages_since_refresh: int = 50) -> bool:
-        """
-        Determine if system prompt should be refreshed.
-        
-        Criteria:
-        - Too many messages since last system prompt
-        - Potential drift in behavior
-        
-        Args:
-            max_messages_since_refresh: Max messages before suggesting refresh
-            
-        Returns:
-            True if refresh recommended
-        """
-        if not self._system_prompt_sent:
+        if not self.is_active:
             return True
-        
-        if self._last_system_refresh is None:
-            # Count messages since initial system prompt
-            messages_since = len(self.history)
-        else:
-            # Count messages since last refresh
-            messages_since = sum(
-                1 for m in self.history
-                if m.timestamp > self._last_system_refresh
-            )
-        
-        return messages_since >= max_messages_since_refresh
+            
+        idle_time = datetime.now(timezone.utc) - self.last_activity
+        idle_hours = idle_time.total_seconds() / 3600
+        return idle_hours > max_idle_hours
     
-    def get_message_count(self) -> int:
-        """Get total number of messages in history."""
-        return len(self.history)
+    def close(self) -> None:
+        """Close/deactivate the session."""
+        self.is_active = False
+        self.last_activity = datetime.now(timezone.utc)
     
-    def get_message_count_by_type(self) -> dict[str, int]:
-        """
-        Get message counts grouped by type.
-        
-        Returns:
-            Dict of {message_type: count}
-        """
-        counts = {}
-        for message in self.history:
-            msg_type = message.type
-            counts[msg_type] = counts.get(msg_type, 0) + 1
-        return counts
-    
-    def clear_history(self) -> None:
-        """
-        Clear conversation history.
-        
-        Warning: This is destructive and cannot be undone.
-        Use for cleanup or reset scenarios.
-        """
-        self.history.clear()
-        self._system_prompt_sent = False
-        self._last_system_refresh = None
-    
-    def to_dict(self) -> dict:
-        """
-        Serialize session to dictionary.
-        
-        Returns:
-            Dict representation of session
-        """
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert session to dictionary for serialization."""
         return {
             "id": self.id,
             "created_at": self.created_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
             "metadata": self.metadata,
-            "message_count": self.get_message_count(),
-            "message_counts_by_type": self.get_message_count_by_type(),
-            "system_prompt_sent": self._system_prompt_sent,
-            "last_system_refresh": (
-                self._last_system_refresh.isoformat()
-                if self._last_system_refresh else None
-            ),
+            "stats": self.stats,
+            "is_active": self.is_active,
+            "copilot_session_id": self.copilot_session_id
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Session':
+        """Create session from dictionary."""
+        session = cls(session_id=data["id"], metadata=data.get("metadata", {}))
+        session.created_at = datetime.fromisoformat(data["created_at"])
+        session.last_activity = datetime.fromisoformat(data["last_activity"])
+        session.stats = data.get("stats", {})
+        session.is_active = data.get("is_active", True)
+        session.copilot_session_id = data.get("copilot_session_id", session.id)
+        return session
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """Get session summary for display."""
+        duration_minutes = self.stats["session_duration_seconds"] / 60
+        return {
+            "session_id": self.id,
+            "duration_minutes": round(duration_minutes, 1),
+            "requests": self.stats["requests_count"],
+            "tool_calls": self.stats["tool_calls_count"],
+            "errors": self.stats["errors_count"],
+            "last_model": self.stats["last_model_used"],
+            "is_active": self.is_active,
+            "created": self.created_at.strftime("%Y-%m-%d %H:%M")
         }
     
     def __repr__(self) -> str:
-        """String representation of session."""
-        return (
-            f"Session(id={self.id}, "
-            f"messages={self.get_message_count()}, "
-            f"created={self.created_at.isoformat()})"
-        )
+        return f"Session(id={self.id}, requests={self.stats['requests_count']}, active={self.is_active})"

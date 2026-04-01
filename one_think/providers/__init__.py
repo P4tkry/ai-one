@@ -270,13 +270,13 @@ class CopilotProvider(LLMProvider):
         **kwargs
     ) -> ProviderResponse:
         """
-        Send messages to Copilot CLI.
+        Send messages to Copilot CLI with session management.
         
         Args:
-            messages: Conversation messages
+            messages: Conversation messages (only current prompt - history handled by Copilot CLI)
             request_id: Request correlation ID
-            session_id: Copilot session ID
-            **kwargs: Additional parameters
+            session_id: Session ID for Copilot CLI --resume parameter
+            **kwargs: Additional parameters (catalog, etc.)
             
         Returns:
             Copilot response
@@ -287,18 +287,19 @@ class CopilotProvider(LLMProvider):
             # Import copilot functionality
             from one_think.copilot import ask_question
             
-            # Convert messages to prompt
-            prompt = self._format_messages_for_copilot(messages)
+            # Extract current user prompt from messages
+            # Since Copilot CLI handles history with --resume, we only send the latest prompt
+            prompt = self._extract_current_prompt(messages)
             
-            # Use provided session_id or create new one
-            copilot_session_id = session_id or self.session_id
+            # Use provided session_id for Copilot CLI --resume
+            copilot_session_id = session_id
             
-            # Call Copilot CLI
+            # Call Copilot CLI with session continuity
             result_session_id, response_content = ask_question(
                 prompt=prompt,
                 model=self.config.model,
                 session_id=copilot_session_id,
-                catalog=kwargs.get("catalog")
+                catalog=kwargs.get('catalog')
             )
             
             # Update session ID for future requests
@@ -339,12 +340,34 @@ class CopilotProvider(LLMProvider):
             else:
                 raise ProviderError(f"Copilot provider error: {e}") from e
     
+    def _extract_current_prompt(self, messages: List[ProviderMessage]) -> str:
+        """
+        Extract current user prompt from messages.
+        
+        Since Copilot CLI handles conversation history via --resume,
+        we only need to send the current user prompt, not entire conversation.
+        
+        Args:
+            messages: Provider messages
+            
+        Returns:
+            Current user prompt
+        """
+        # Find the latest user message
+        for message in reversed(messages):
+            if message.role == "user":
+                return message.content
+        
+        # Fallback: if no user message, format all messages
+        # This handles cases where there are only system/assistant messages
+        return self._format_messages_for_copilot(messages)
+    
     def _format_messages_for_copilot(self, messages: List[ProviderMessage]) -> str:
         """
         Format messages for Copilot CLI prompt.
         
-        Copilot CLI expects a single prompt string, so we need to format
-        the conversation into a single coherent prompt.
+        NOTE: This method is now mainly used as fallback.
+        With --resume session management, we typically only send current prompts.
         """
         prompt_parts = []
         

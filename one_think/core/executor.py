@@ -161,19 +161,13 @@ class Executor:
         logger.info(f"Executing request {execution_id} in session {session.id}")
         
         try:
-            # Add system prompt if provided (usually first message)
-            if system_prompt:
-                system_msg = SystemMessage(content=system_prompt)
-                session.add_message(system_msg)
-                logger.debug(f"Added system prompt ({len(system_prompt)} chars)")
+            # Record request start in session statistics
+            session.record_request(had_error=False)
             
-            # Add user message to session
-            user_msg = UserMessage(content=user_input)
-            session.add_message(user_msg)
-            logger.debug(f"Added user message: {user_input[:100]}...")
-            
-            # Execute the conversation loop
-            response, tool_results, errors = self._execute_conversation_loop(session, execution_id)
+            # Execute the conversation loop with Copilot CLI session management
+            response, tool_results, errors = self._execute_conversation_loop(
+                session, execution_id, user_input, system_prompt
+            )
             
             # Calculate execution time
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -214,17 +208,18 @@ class Executor:
     def _execute_conversation_loop(
         self, 
         session: Session, 
-        execution_id: str
+        execution_id: str,
+        user_input: str,
+        system_prompt: Optional[str] = None
     ) -> tuple[str, List[ToolResponse], List[str]]:
         """
-        Execute the main conversation loop with tool iterations.
+        Execute conversation loop with Copilot CLI session management.
         
-        This handles the back-and-forth between LLM and tools:
-        1. Send conversation to LLM
-        2. Parse response (text, tool requests, system refresh)
-        3. Dispatch any tool requests  
-        4. Add results to session
-        5. Repeat until LLM returns text response or max iterations
+        Key changes for Copilot integration:
+        - No message history management (handled by Copilot CLI --resume)
+        - Send only current prompt to LLM via Provider
+        - Session tracks statistics, not conversation history
+        - Tool results handled locally for protocol parsing
         
         Returns:
             (final_response, tool_results, errors)
@@ -237,19 +232,18 @@ class Executor:
             iteration += 1
             logger.debug(f"Conversation loop iteration {iteration}")
             
-            # Send conversation to LLM
+            # Send current request to LLM via Copilot CLI session
             try:
-                llm_response_text = self._call_llm_provider(session)
+                llm_response_text = self._call_llm_provider(
+                    session, user_input, system_prompt
+                )
                 logger.debug(f"LLM response ({len(llm_response_text)} chars): {llm_response_text[:200]}...")
             except Exception as e:
                 error = f"LLM provider error: {str(e)}"
                 logger.error(error, exc_info=True)
                 errors.append(error)
+                session.record_request(had_error=True)
                 return "I encountered an error communicating with the LLM.", tool_results, errors
-            
-            # Add assistant response to session
-            assistant_msg = AssistantMessage(content=llm_response_text)
-            session.add_message(assistant_msg)
             
             # Parse the LLM response
             try:
@@ -298,12 +292,23 @@ class Executor:
         errors.append(warning)
         return "I've reached the maximum number of tool iterations for this request.", tool_results, errors
     
-    def _call_llm_provider(self, session: Session) -> str:
+    def _call_llm_provider(
+        self, 
+        session: Session,
+        user_input: str,
+        system_prompt: Optional[str] = None
+    ) -> str:
         """
-        Send conversation to LLM provider.
+        Call LLM provider with current request and session context.
+        
+        With Copilot CLI integration, we don't send conversation history
+        - that's handled by Copilot CLI --resume. We only send the current
+        prompt and let Copilot CLI manage session continuity.
         
         Args:
-            session: Session with conversation history
+            session: Session for statistics and session_id 
+            user_input: Current user prompt
+            system_prompt: Optional system prompt override
             
         Returns:
             Raw LLM response text
@@ -315,15 +320,25 @@ class Executor:
             raise LLMProviderError("No LLM provider configured")
         
         try:
-            # Convert session to provider format
-            messages = self._format_messages_for_provider(session)
+            # Create current message set (minimal for Copilot CLI)
+            messages = []
+            
+            # Add system prompt if provided
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            
+            # Add current user input
+            messages.append({"role": "user", "content": user_input})
             
             # Check if provider is a Provider instance or function
             from one_think.providers import LLMProvider as BaseProvider
             if isinstance(self.llm_provider, BaseProvider):
-                # Use Provider interface
+                # Use Provider interface with session ID for Copilot CLI
                 provider_messages = self.llm_provider.format_messages(messages)
-                response = self.llm_provider.send_messages(provider_messages)
+                response = self.llm_provider.send_messages(
+                    provider_messages, 
+                    session_id=session.get_copilot_session_id()
+                )
                 return response.content
             else:
                 # Use legacy function interface
@@ -337,60 +352,6 @@ class Executor:
         except Exception as e:
             raise LLMProviderError(f"Provider call failed: {str(e)}") from e
     
-    def _format_messages_for_provider(self, session: Session) -> List[Dict]:
-        """
-        Format session messages for LLM provider.
-        
-        Different providers expect different formats. This provides a standard
-        OpenAI-style format that can be adapted by provider wrappers.
-        
-        Args:
-            session: Session to format
-            
-        Returns:
-            List of message dicts in OpenAI format
-        """
-        formatted_messages = []
-        
-        for message in session.history:
-            if isinstance(message, SystemMessage):
-                formatted_messages.append({
-                    "role": "system",
-                    "content": message.content
-                })
-            elif isinstance(message, UserMessage):
-                formatted_messages.append({
-                    "role": "user", 
-                    "content": message.content
-                })
-            elif isinstance(message, AssistantMessage):
-                formatted_messages.append({
-                    "role": "assistant",
-                    "content": message.content
-                })
-            elif isinstance(message, ToolResultMessage):
-                # Format tool result for provider - the result is in content as JSON
-                try:
-                    tool_data = json.loads(message.content)
-                    tool_result_text = f"Tool '{message.tool_name}' result:\n{json.dumps(tool_data.get('result'), indent=2)}"
-                    if tool_data.get('error'):
-                        tool_result_text += f"\nError: {tool_data['error']}"
-                except (json.JSONDecodeError, Exception):
-                    # Fallback to raw content if JSON parsing fails
-                    tool_result_text = f"Tool '{message.tool_name}' result:\n{message.content}"
-                
-                formatted_messages.append({
-                    "role": "system",  # Or "user" depending on provider
-                    "content": tool_result_text
-                })
-            elif isinstance(message, SystemRefreshMessage):
-                formatted_messages.append({
-                    "role": "system",
-                    "content": message.content
-                })
-        
-        return formatted_messages
-    
     def _dispatch_tools(
         self, 
         tool_requests: List[ToolRequest], 
@@ -402,7 +363,7 @@ class Executor:
         
         Args:
             tool_requests: List of tool requests to execute
-            session: Session to add results to
+            session: Session for statistics tracking
             execution_id: Execution ID for correlation
             
         Returns:
@@ -436,7 +397,8 @@ class Executor:
                     request_id=request_id,
                     execution_time_ms=tool_result.execution_time_ms
                 )
-                session.add_message(tool_msg)
+                # Record tool execution in session stats
+                session.record_request(tool_calls=1)
                 
                 logger.debug(f"Tool {tool_request.tool_name} executed: {tool_result.status}")
                 
@@ -445,20 +407,8 @@ class Executor:
                 logger.error(error, exc_info=True)
                 errors.append(error)
                 
-                # Add error result to session
-                error_msg = ToolResultMessage(
-                    content=json.dumps({
-                        "tool": tool_request.tool_name,
-                        "status": "error",
-                        "result": None,
-                        "error": error,
-                        "execution_time_ms": None
-                    }),
-                    tool_name=tool_request.tool_name,
-                    status="error",
-                    request_id=request_id
-                )
-                session.add_message(error_msg)
+                # Record tool error in session stats
+                session.record_request(tool_calls=1, had_error=True)
         
         return tool_results, errors
     
@@ -522,136 +472,12 @@ class Executor:
         reason = refresh_request.reason or "System refresh requested"
         logger.info(f"System refresh requested: {reason}")
         
-        # Build comprehensive system prompt
-        system_content = self._build_refreshed_system_prompt(session, reason)
+        # Record system refresh request
+        logger.info(f"System refresh requested: {reason}")
+        session.set_metadata("last_system_refresh", reason)
         
-        # Add system refresh message to session
-        refresh_msg = SystemRefreshMessage(
-            content=system_content,
-            reason=reason
-        )
-        session.add_message(refresh_msg)
-        
-        logger.debug(f"System prompt refreshed with {len(system_content)} characters")
+        logger.debug("System refresh recorded in session metadata")
     
-    def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
-        """
-        Build a comprehensive refreshed system prompt.
-        
-        Args:
-            session: Current session for context
-            reason: Reason for refresh
-            
-        Returns:
-            Complete system prompt content
-        """
-        from datetime import datetime, timezone
-        
-        # Get message count using correct Session API
-        all_messages = session.get_history()
-        message_count = len(all_messages)
-        
-        # Core system prompt components
-        system_parts = [
-            "# AI-ONE System Prompt (Refreshed)",
-            f"Timestamp: {datetime.now(timezone.utc).isoformat()}",
-            f"Refresh reason: {reason}",
-            f"Session ID: {session.id}",
-            f"Message count: {message_count}",
-            "",
-            "## Core Instructions",
-            "You are an AI assistant integrated with AI-ONE tool system.",
-            "You can request tools in JSON format and provide natural language responses.",
-            "",
-            "## Available Response Types",
-            "1. Natural response: {\"type\": \"response\", \"content\": \"your answer\"}",
-            "2. Tool request: {\"type\": \"tool_request\", \"tools\": [{\"tool_name\": \"...\", \"params\": {...}, \"id\": \"req_1\"}]}",
-            "3. System refresh: {\"type\": \"system_refresh_request\", \"reason\": \"why\"}",
-            "",
-            "## Guidelines",
-            "- Use tools when needed to gather information or perform actions",
-            "- Provide clear, helpful responses to user questions",
-            "- Be concise but thorough in explanations",
-            "- Handle errors gracefully and inform the user",
-            "",
-        ]
-        
-        # Add available tools summary
-        if hasattr(self, 'tool_registry') and self.tool_registry:
-            try:
-                available_tools = list(self.tool_registry.list_tools())
-                system_parts.extend([
-                    f"## Available Tools ({len(available_tools)} total)",
-                    "Tools you can request:",
-                ])
-                
-                # Group tools by category for better organization
-                tool_categories = {}
-                for tool_name in available_tools:
-                    try:
-                        metadata = self.tool_registry.get_tool_metadata(tool_name)
-                        category = getattr(metadata, 'category', 'General')
-                        if category not in tool_categories:
-                            tool_categories[category] = []
-                        tool_categories[category].append(tool_name)
-                    except Exception:
-                        # Fallback if metadata unavailable
-                        if 'General' not in tool_categories:
-                            tool_categories['General'] = []
-                        tool_categories['General'].append(tool_name)
-                
-                # Add tools by category
-                for category, tools in sorted(tool_categories.items()):
-                    system_parts.append(f"### {category}")
-                    for tool_name in sorted(tools):
-                        system_parts.append(f"- {tool_name}")
-                    system_parts.append("")
-                    
-            except Exception as e:
-                system_parts.extend([
-                    "## Available Tools",
-                    f"Error loading tool registry: {str(e)}",
-                    "Use tools cautiously and check for errors.",
-                    "",
-                ])
-        
-        # Add session context summary if session has history
-        if message_count > 1:
-            # Count message types for context
-            msg_counts = {}
-            recent_messages = []
-            
-            # Get recent messages (last 10)
-            recent_msg_list = all_messages[-10:] if len(all_messages) > 10 else all_messages
-            
-            for msg in recent_msg_list:
-                msg_type = msg.type.value if hasattr(msg.type, 'value') else str(msg.type)
-                msg_counts[msg_type] = msg_counts.get(msg_type, 0) + 1
-                recent_messages.append(f"- {msg_type}: {msg.content[:50]}...")
-            
-            system_parts.extend([
-                "## Session Context",
-                f"Recent conversation has {message_count} messages:",
-                f"Types: {', '.join(f'{k}({v})' for k, v in msg_counts.items())}",
-                "",
-                "Recent messages:",
-            ])
-            system_parts.extend(recent_messages[-5:])  # Last 5 messages
-            system_parts.append("")
-        
-        # Add refresh-specific instructions
-        system_parts.extend([
-            "## Refresh Instructions",
-            "This is a system prompt refresh. You should:",
-            "- Continue the conversation naturally",
-            "- Use updated tool information if needed",
-            "- Maintain context from previous messages",
-            "- Apply any new guidelines or capabilities",
-            "",
-            "You may now proceed with the conversation."
-        ])
-        
-        return "\n".join(system_parts)
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):
         """Set the LLM provider function or Provider instance."""
