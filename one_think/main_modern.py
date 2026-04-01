@@ -83,11 +83,23 @@ def run_modern_copilot(config: Optional[CopilotConfig] = None):
                     print("ℹ️  No active session to clear.")
                 continue
                 
+            elif prompt == '/refresh':
+                if session_id:
+                    success = wrapper.refresh_system_prompt(session_id, "manual refresh requested")
+                    if success:
+                        print("🔄 System prompt refreshed for current session.")
+                    else:
+                        print("❌ Failed to refresh system prompt.")
+                else:
+                    print("ℹ️  No active session to refresh.")
+                continue
+                
             elif prompt == '/help':
                 print("\n🆘 Available Commands:")
                 print("  /stats    - Show usage statistics")
                 print("  /sessions - List active sessions")
                 print("  /clear    - Clear current session")
+                print("  /refresh  - Refresh system prompt for current session")
                 print("  /help     - Show this help")
                 print("  quit/exit/q - Exit the program")
                 continue

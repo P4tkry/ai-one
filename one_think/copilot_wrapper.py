@@ -237,6 +237,33 @@ class CopilotWrapper:
             return True
         return False
     
+    def refresh_system_prompt(self, session_id: str, reason: str = "manual refresh") -> bool:
+        """
+        Manually trigger system prompt refresh for a session.
+        
+        Args:
+            session_id: Session ID to refresh  
+            reason: Reason for refresh
+            
+        Returns:
+            True if refresh was successful, False if session not found
+        """
+        try:
+            session = self._get_or_create_session(session_id)
+            
+            # Trigger refresh through executor
+            from one_think.core.protocol import SystemRefreshRequest
+            refresh_request = SystemRefreshRequest(reason=reason)
+            
+            self.executor._handle_system_refresh(refresh_request, session)
+            
+            logger.info(f"System prompt refreshed for session {session_id}: {reason}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh system prompt for {session_id}: {e}")
+            return False
+    
     def get_usage_stats(self) -> Dict[str, Any]:
         """Get comprehensive usage statistics."""
         provider_stats = self.provider.get_usage_stats()

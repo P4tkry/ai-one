@@ -509,20 +509,149 @@ class Executor:
         """
         Handle system prompt refresh request.
         
+        Rebuilds system prompt with:
+        - Core guidelines and instructions
+        - Available tools summary  
+        - Session context summary
+        - Current timestamp and environment
+        
         Args:
             refresh_request: System refresh request details
             session: Session to add refresh message to
         """
-        logger.info(f"System refresh requested: {refresh_request.reason}")
+        reason = refresh_request.reason or "System refresh requested"
+        logger.info(f"System refresh requested: {reason}")
         
-        # This is a placeholder - in a real implementation, you'd:
-        # 1. Load fresh system prompt from templates
-        # 2. Apply any dynamic content
-        # 3. Add to session
+        # Build comprehensive system prompt
+        system_content = self._build_refreshed_system_prompt(session, reason)
         
-        refresh_content = "System prompt refreshed due to: " + refresh_request.reason
-        refresh_msg = SystemRefreshMessage(content=refresh_content)
+        # Add system refresh message to session
+        refresh_msg = SystemRefreshMessage(
+            content=system_content,
+            reason=reason
+        )
         session.add_message(refresh_msg)
+        
+        logger.debug(f"System prompt refreshed with {len(system_content)} characters")
+    
+    def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
+        """
+        Build a comprehensive refreshed system prompt.
+        
+        Args:
+            session: Current session for context
+            reason: Reason for refresh
+            
+        Returns:
+            Complete system prompt content
+        """
+        from datetime import datetime, timezone
+        
+        # Get message count using correct Session API
+        all_messages = session.get_history()
+        message_count = len(all_messages)
+        
+        # Core system prompt components
+        system_parts = [
+            "# AI-ONE System Prompt (Refreshed)",
+            f"Timestamp: {datetime.now(timezone.utc).isoformat()}",
+            f"Refresh reason: {reason}",
+            f"Session ID: {session.id}",
+            f"Message count: {message_count}",
+            "",
+            "## Core Instructions",
+            "You are an AI assistant integrated with AI-ONE tool system.",
+            "You can request tools in JSON format and provide natural language responses.",
+            "",
+            "## Available Response Types",
+            "1. Natural response: {\"type\": \"response\", \"content\": \"your answer\"}",
+            "2. Tool request: {\"type\": \"tool_request\", \"tools\": [{\"tool_name\": \"...\", \"params\": {...}, \"id\": \"req_1\"}]}",
+            "3. System refresh: {\"type\": \"system_refresh_request\", \"reason\": \"why\"}",
+            "",
+            "## Guidelines",
+            "- Use tools when needed to gather information or perform actions",
+            "- Provide clear, helpful responses to user questions",
+            "- Be concise but thorough in explanations",
+            "- Handle errors gracefully and inform the user",
+            "",
+        ]
+        
+        # Add available tools summary
+        if hasattr(self, 'tool_registry') and self.tool_registry:
+            try:
+                available_tools = list(self.tool_registry.list_tools())
+                system_parts.extend([
+                    f"## Available Tools ({len(available_tools)} total)",
+                    "Tools you can request:",
+                ])
+                
+                # Group tools by category for better organization
+                tool_categories = {}
+                for tool_name in available_tools:
+                    try:
+                        metadata = self.tool_registry.get_tool_metadata(tool_name)
+                        category = getattr(metadata, 'category', 'General')
+                        if category not in tool_categories:
+                            tool_categories[category] = []
+                        tool_categories[category].append(tool_name)
+                    except Exception:
+                        # Fallback if metadata unavailable
+                        if 'General' not in tool_categories:
+                            tool_categories['General'] = []
+                        tool_categories['General'].append(tool_name)
+                
+                # Add tools by category
+                for category, tools in sorted(tool_categories.items()):
+                    system_parts.append(f"### {category}")
+                    for tool_name in sorted(tools):
+                        system_parts.append(f"- {tool_name}")
+                    system_parts.append("")
+                    
+            except Exception as e:
+                system_parts.extend([
+                    "## Available Tools",
+                    f"Error loading tool registry: {str(e)}",
+                    "Use tools cautiously and check for errors.",
+                    "",
+                ])
+        
+        # Add session context summary if session has history
+        if message_count > 1:
+            # Count message types for context
+            msg_counts = {}
+            recent_messages = []
+            
+            # Get recent messages (last 10)
+            recent_msg_list = all_messages[-10:] if len(all_messages) > 10 else all_messages
+            
+            for msg in recent_msg_list:
+                msg_type = msg.type.value if hasattr(msg.type, 'value') else str(msg.type)
+                msg_counts[msg_type] = msg_counts.get(msg_type, 0) + 1
+                recent_messages.append(f"- {msg_type}: {msg.content[:50]}...")
+            
+            system_parts.extend([
+                "## Session Context",
+                f"Recent conversation has {message_count} messages:",
+                f"Types: {', '.join(f'{k}({v})' for k, v in msg_counts.items())}",
+                "",
+                "Recent messages:",
+            ])
+            system_parts.extend(recent_messages[-5:])  # Last 5 messages
+            system_parts.append("")
+        
+        # Add refresh-specific instructions
+        system_parts.extend([
+            "## Refresh Instructions",
+            "This is a system prompt refresh. You should:",
+            "- Continue the conversation naturally",
+            "- Use updated tool information if needed",
+            "- Maintain context from previous messages",
+            "- Apply any new guidelines or capabilities",
+            "",
+            "You may now proceed with the conversation."
+        ])
+        
+        return "\n".join(system_parts)
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):
         """Set the LLM provider function or Provider instance."""
