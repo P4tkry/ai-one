@@ -23,7 +23,7 @@ from one_think.core.message import (
 )
 from one_think.core.protocol import (
     Protocol, ProtocolParseResult, ToolRequest as ProtocolToolRequest, 
-    LLMResponse, SystemRefreshRequest, ToolCall
+    LLMResponse, SystemRefreshRequest, ToolCall, ResponseType
 )
 from one_think.tools.registry import ToolRegistry, tool_registry as global_registry
 from one_think.tools.base import ToolResponse
@@ -254,7 +254,7 @@ class Executor:
             # Parse the LLM response
             try:
                 parse_result = self.protocol.parse(llm_response_text)
-                logger.debug(f"Parsed response type: {parse_result.response_type}")
+                logger.debug(f"Parsed response type: {parse_result.type}")
             except Exception as e:
                 error = f"Protocol parse error: {str(e)}"
                 logger.error(error, exc_info=True)
@@ -263,11 +263,11 @@ class Executor:
                 return llm_response_text, tool_results, errors
             
             # Handle different response types
-            if parse_result.response_type == "tool_request":
+            if parse_result.type == ResponseType.TOOL_REQUEST:
                 # Convert protocol tool calls to executor tool requests
                 tool_requests = [
                     ToolRequest(tool_name=tc.tool_name, params=tc.params, id=tc.id)
-                    for tc in parse_result.tool_request.tools
+                    for tc in parse_result.tools
                 ]
                 
                 # Dispatch tools and continue loop
@@ -279,17 +279,17 @@ class Executor:
                 tool_results.extend(iteration_tool_results)
                 errors.extend(iteration_errors)
                 
-            elif parse_result.response_type == "system_refresh_request":
+            elif parse_result.type == ResponseType.SYSTEM_REFRESH_REQUEST:
                 # Handle system refresh request
-                self._handle_system_refresh(parse_result.system_refresh_request, session)
+                self._handle_system_refresh(parse_result, session)
                 
-            elif parse_result.response_type == "response":
+            elif parse_result.type == ResponseType.RESPONSE:
                 # Text response - we're done
-                return parse_result.response.content, tool_results, errors
+                return parse_result.content, tool_results, errors
                 
             else:
                 # Unknown response type - treat as text
-                logger.warning(f"Unknown response type: {parse_result.response_type}")
+                logger.warning(f"Unknown response type: {parse_result.type}")
                 return llm_response_text, tool_results, errors
         
         # Max iterations reached
@@ -369,10 +369,15 @@ class Executor:
                     "content": message.content
                 })
             elif isinstance(message, ToolResultMessage):
-                # Format tool result for provider
-                tool_result_text = f"Tool '{message.tool_name}' result:\n{json.dumps(message.result, indent=2)}"
-                if message.error:
-                    tool_result_text += f"\nError: {message.error}"
+                # Format tool result for provider - the result is in content as JSON
+                try:
+                    tool_data = json.loads(message.content)
+                    tool_result_text = f"Tool '{message.tool_name}' result:\n{json.dumps(tool_data.get('result'), indent=2)}"
+                    if tool_data.get('error'):
+                        tool_result_text += f"\nError: {tool_data['error']}"
+                except (json.JSONDecodeError, Exception):
+                    # Fallback to raw content if JSON parsing fails
+                    tool_result_text = f"Tool '{message.tool_name}' result:\n{message.content}"
                 
                 formatted_messages.append({
                     "role": "system",  # Or "user" depending on provider
@@ -419,12 +424,17 @@ class Executor:
                 
                 # Add result to session
                 tool_msg = ToolResultMessage(
+                    content=json.dumps({
+                        "tool": tool_result.tool,
+                        "status": tool_result.status,
+                        "result": tool_result.result,
+                        "error": tool_result.error,
+                        "execution_time_ms": tool_result.execution_time_ms
+                    }),
                     tool_name=tool_request.tool_name,
-                    result=tool_result.result,
-                    error=tool_result.error,
                     status=tool_result.status,
-                    execution_time_ms=tool_result.execution_time_ms,
-                    request_id=request_id
+                    request_id=request_id,
+                    execution_time_ms=tool_result.execution_time_ms
                 )
                 session.add_message(tool_msg)
                 
@@ -437,9 +447,14 @@ class Executor:
                 
                 # Add error result to session
                 error_msg = ToolResultMessage(
+                    content=json.dumps({
+                        "tool": tool_request.tool_name,
+                        "status": "error",
+                        "result": None,
+                        "error": error,
+                        "execution_time_ms": None
+                    }),
                     tool_name=tool_request.tool_name,
-                    result=None,
-                    error=error,
                     status="error",
                     request_id=request_id
                 )
