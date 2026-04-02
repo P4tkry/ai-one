@@ -1,0 +1,237 @@
+"""
+Debug logging configuration for AI-ONE.
+
+When DEBUG=1 environment variable is set, enables comprehensive debug logging
+for all components: sessions, tools, providers, protocol parsing, etc.
+"""
+
+import os
+import logging
+import sys
+from typing import Dict, Any
+from datetime import datetime
+
+
+class DebugLogger:
+    """Enhanced debug logger for AI-ONE with detailed component tracking."""
+    
+    def __init__(self):
+        self.debug_enabled = os.getenv('DEBUG', '0') == '1'
+        self.logger = logging.getLogger('ai_one_debug')
+        
+        if self.debug_enabled:
+            self._setup_debug_logging()
+    
+    def _setup_debug_logging(self):
+        """Configure detailed debug logging."""
+        # Set logging level to DEBUG for all AI-ONE components
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)
+        
+        # Create detailed formatter
+        formatter = logging.Formatter(
+            '%(asctime)s.%(msecs)03d | %(levelname)8s | %(name)20s | %(funcName)15s:%(lineno)03d | %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        
+        # Console handler with colors if available
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(formatter)
+        
+        # Add handler to root logger
+        if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+            root_logger.addHandler(console_handler)
+        
+        # Set DEBUG level for all AI-ONE components
+        for component in [
+            'one_think',
+            'one_think.core',
+            'one_think.core.executor',
+            'one_think.core.session', 
+            'one_think.core.protocol',
+            'one_think.core.message',
+            'one_think.tools',
+            'one_think.tools.registry',
+            'one_think.providers',
+            'one_think.aione_wrapper'
+        ]:
+            logging.getLogger(component).setLevel(logging.DEBUG)
+    
+    def debug_component(self, component: str, action: str, data: Dict[str, Any] = None):
+        """Log detailed component debug information."""
+        if not self.debug_enabled:
+            return
+            
+        logger = logging.getLogger(f'ai_one_debug.{component}')
+        
+        message = f"🔍 {action}"
+        if data:
+            message += f" | Data: {data}"
+        
+        logger.debug(message)
+    
+    def debug_request_start(self, request_id: str, user_input: str, session_id: str):
+        """Log request start with full details."""
+        if not self.debug_enabled:
+            return
+        
+        self.debug_component('request', 'START', {
+            'request_id': request_id,
+            'user_input': user_input[:100] + '...' if len(user_input) > 100 else user_input,
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def debug_request_end(self, request_id: str, status: str, execution_time_ms: float):
+        """Log request completion with timing."""
+        if not self.debug_enabled:
+            return
+            
+        self.debug_component('request', 'END', {
+            'request_id': request_id,
+            'status': status,
+            'execution_time_ms': execution_time_ms,
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def debug_llm_call(self, provider: str, messages: list, request_id: str):
+        """Log LLM provider calls with full message context."""
+        if not self.debug_enabled:
+            return
+        
+        # Handle both dict and object messages
+        formatted_messages = []
+        for msg in messages[:3]:  # First 3 messages for context
+            if hasattr(msg, '__dict__'):
+                # Object with attributes
+                formatted_messages.append({
+                    'type': getattr(msg, 'type', 'unknown'),
+                    'content': str(getattr(msg, 'content', ''))[:200] + '...' if len(str(getattr(msg, 'content', ''))) > 200 else str(getattr(msg, 'content', ''))
+                })
+            elif isinstance(msg, dict):
+                # Dictionary
+                formatted_messages.append({
+                    'author': msg.get('author', msg.get('role', 'unknown')),
+                    'content': msg.get('message', msg.get('content', ''))[:200] + '...' if len(msg.get('message', msg.get('content', ''))) > 200 else msg.get('message', msg.get('content', ''))
+                })
+            else:
+                # String or other
+                formatted_messages.append({
+                    'type': 'raw',
+                    'content': str(msg)[:200] + '...' if len(str(msg)) > 200 else str(msg)
+                })
+        
+        self.debug_component('llm', 'CALL', {
+            'provider': provider,
+            'request_id': request_id,
+            'message_count': len(messages),
+            'messages': formatted_messages
+        })
+    
+    def debug_llm_response(self, provider: str, response: str, request_id: str):
+        """Log LLM responses."""
+        if not self.debug_enabled:
+            return
+        
+        self.debug_component('llm', 'RESPONSE', {
+            'provider': provider,
+            'request_id': request_id,
+            'response_length': len(response),
+            'response_preview': response[:300] + '...' if len(response) > 300 else response
+        })
+    
+    def debug_tool_execution(self, tool_name: str, params: Dict[str, Any], request_id: str):
+        """Log tool execution attempts."""
+        if not self.debug_enabled:
+            return
+            
+        self.debug_component('tool', 'EXECUTE', {
+            'tool_name': tool_name,
+            'request_id': request_id,
+            'params_keys': list(params.keys()) if params else [],
+            'param_count': len(params) if params else 0
+        })
+    
+    def debug_tool_result(self, tool_name: str, status: str, result_size: int, request_id: str):
+        """Log tool execution results."""
+        if not self.debug_enabled:
+            return
+            
+        self.debug_component('tool', 'RESULT', {
+            'tool_name': tool_name,
+            'request_id': request_id,
+            'status': status,
+            'result_size_bytes': result_size
+        })
+    
+    def debug_session_update(self, session_id: str, action: str, data: Dict[str, Any] = None):
+        """Log session state changes."""
+        if not self.debug_enabled:
+            return
+            
+        self.debug_component('session', action, {
+            'session_id': session_id[:8] + '...',  # Truncate for privacy
+            'data': data
+        })
+    
+    def debug_protocol_parse(self, raw_response: str, parsed_type: str, request_id: str):
+        """Log protocol parsing details."""
+        if not self.debug_enabled:
+            return
+            
+        self.debug_component('protocol', 'PARSE', {
+            'request_id': request_id,
+            'raw_length': len(raw_response),
+            'parsed_type': parsed_type,
+            'raw_preview': raw_response[:200] + '...' if len(raw_response) > 200 else raw_response
+        })
+
+
+# Global debug logger instance
+debug_logger = DebugLogger()
+
+
+def debug_component(component: str, action: str, data: Dict[str, Any] = None):
+    """Convenience function for component debug logging."""
+    debug_logger.debug_component(component, action, data)
+
+
+def debug_request_start(request_id: str, user_input: str, session_id: str):
+    """Convenience function for request start logging."""
+    debug_logger.debug_request_start(request_id, user_input, session_id)
+
+
+def debug_request_end(request_id: str, status: str, execution_time_ms: float):
+    """Convenience function for request end logging.""" 
+    debug_logger.debug_request_end(request_id, status, execution_time_ms)
+
+
+def debug_llm_call(provider: str, messages: list, request_id: str):
+    """Convenience function for LLM call logging."""
+    debug_logger.debug_llm_call(provider, messages, request_id)
+
+
+def debug_llm_response(provider: str, response: str, request_id: str):
+    """Convenience function for LLM response logging."""
+    debug_logger.debug_llm_response(provider, response, request_id)
+
+
+def debug_tool_execution(tool_name: str, params: Dict[str, Any], request_id: str):
+    """Convenience function for tool execution logging."""
+    debug_logger.debug_tool_execution(tool_name, params, request_id)
+
+
+def debug_tool_result(tool_name: str, status: str, result_size: int, request_id: str):
+    """Convenience function for tool result logging."""
+    debug_logger.debug_tool_result(tool_name, status, result_size, request_id)
+
+
+def debug_session_update(session_id: str, action: str, data: Dict[str, Any] = None):
+    """Convenience function for session update logging."""
+    debug_logger.debug_session_update(session_id, action, data)
+
+
+def debug_protocol_parse(raw_response: str, parsed_type: str, request_id: str):
+    """Convenience function for protocol parse logging."""
+    debug_logger.debug_protocol_parse(raw_response, parsed_type, request_id)

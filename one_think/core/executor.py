@@ -28,6 +28,10 @@ from one_think.core.protocol import (
 )
 from one_think.tools.registry import ToolRegistry, tool_registry as global_registry
 from one_think.tools.base import ToolResponse
+from one_think.debug import (
+    debug_component, debug_llm_call, debug_llm_response, 
+    debug_tool_execution, debug_tool_result, debug_protocol_parse
+)
 
 
 logger = logging.getLogger(__name__)
@@ -224,6 +228,12 @@ class Executor:
         Returns:
             (final_response, tool_results, errors)
         """
+        debug_component('executor', 'CONVERSATION_LOOP_START', {
+            'execution_id': execution_id,
+            'session_id': session.id,
+            'max_iterations': self.max_tool_iterations
+        })
+        
         tool_results = []
         errors = []
         iteration = 0
@@ -233,6 +243,12 @@ class Executor:
         
         while iteration < self.max_tool_iterations:
             iteration += 1
+            debug_component('executor', 'ITERATION_START', {
+                'execution_id': execution_id,
+                'iteration': iteration,
+                'max_iterations': self.max_tool_iterations
+            })
+            
             logger.debug(f"Conversation loop iteration {iteration}")
             
             # Send current request to LLM via Copilot CLI session
@@ -241,6 +257,7 @@ class Executor:
                     session, user_input, system_prompt, accumulated_tool_results
                 )
                 logger.debug(f"LLM response ({len(llm_response_text)} chars): {llm_response_text[:200]}...")
+                debug_llm_response('copilot', llm_response_text, execution_id)
             except Exception as e:
                 error = f"LLM provider error: {str(e)}"
                 logger.error(error, exc_info=True)
@@ -359,13 +376,18 @@ class Executor:
             if isinstance(self.llm_provider, BaseProvider):
                 # Use Provider interface with session ID for Copilot CLI
                 provider_messages = self.llm_provider.format_messages(messages)
+                debug_llm_call('copilot', provider_messages, session.id)
                 response = self.llm_provider.send_messages(
                     provider_messages, 
                     session_id=session.get_copilot_session_id()
                 )
+                debug_component('executor', 'LLM_RESPONSE_RECEIVED', {
+                    'response_length': len(response.content) if hasattr(response, 'content') else len(str(response))
+                })
                 return response.content
             else:
                 # Use legacy function interface
+                debug_llm_call('copilot', messages, session.id)
                 response = self.llm_provider(messages)
                 
                 if not response or not isinstance(response, str):
@@ -397,15 +419,28 @@ class Executor:
         errors = []
         
         logger.info(f"Dispatching {len(tool_requests)} tools")
+        debug_component('executor', 'TOOL_DISPATCH_START', {
+            'tool_count': len(tool_requests),
+            'tool_names': [tr.tool_name for tr in tool_requests]
+        })
         
         for i, tool_request in enumerate(tool_requests):
             request_id = f"{execution_id}_tool_{i+1}"
             logger.debug(f"Dispatching tool: {tool_request.tool_name} (ID: {request_id})")
+            debug_tool_execution(tool_request.tool_name, tool_request.params, request_id)
             
             try:
                 # Execute the tool
                 tool_result = self._execute_single_tool(tool_request, request_id)
                 tool_results.append(tool_result)
+                
+                # Debug tool result
+                debug_tool_result(
+                    tool_request.tool_name, 
+                    tool_result.status,
+                    len(str(tool_result.result)) if tool_result.result else 0,
+                    request_id
+                )
                 
                 # Add result to session
                 tool_msg = ToolResultMessage(

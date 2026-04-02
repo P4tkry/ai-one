@@ -18,6 +18,10 @@ from .core import Executor, ExecutionResult
 from .core import Session
 from .tools import tool_registry
 from .providers import create_copilot_provider, CopilotProvider
+from .debug import (
+    debug_request_start, debug_request_end, debug_session_update,
+    debug_component
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,19 +115,40 @@ class AiOneWrapper:
         Returns:
             Tuple of (session_id, response_text)
         """
+        # Generate session ID if needed
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            debug_component('wrapper', 'NEW_SESSION_GENERATED', {'session_id': session_id[:8] + '...'})
+
+        # Generate request ID for tracking
+        request_id = f"aione_{session_id[:8]}_{uuid.uuid4().hex[:8]}"
+        
+        # Debug request start
+        debug_request_start(request_id, question, session_id)
+        
         try:
-            # Generate session ID if needed
-            if session_id is None:
-                session_id = str(uuid.uuid4())
             
             # Get or create session
             session = self._get_or_create_session(session_id)
+            debug_session_update(session_id, 'RETRIEVED', {
+                'requests_count': session.stats['requests_count'],
+                'created_at': session.created_at.isoformat()
+            })
             
             # Determine system prompt
             final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
+            debug_component('wrapper', 'SYSTEM_PROMPT', {
+                'custom_provided': system_prompt is not None,
+                'config_provided': self.config.system_prompt is not None,
+                'prompt_length': len(final_system_prompt)
+            })
             
             # Create provider
             provider = self._create_provider()
+            debug_component('wrapper', 'PROVIDER_CREATED', {
+                'provider_type': type(provider).__name__,
+                'model': getattr(provider, 'model', 'unknown')
+            })
             
             # Initialize executor with provider for this request
             # Note: For now we create executor per request with provider
@@ -133,13 +158,17 @@ class AiOneWrapper:
                 llm_provider=provider,
                 max_tool_iterations=self.config.max_tool_iterations
             )
+            debug_component('wrapper', 'EXECUTOR_CREATED', {
+                'max_iterations': self.config.max_tool_iterations,
+                'tools_enabled': self.tool_registry is not None
+            })
             
             # Execute request
             result: ExecutionResult = executor.execute_request(
                 user_input=question,
                 session=session,
                 system_prompt=final_system_prompt,
-                request_id=f"aione_{session_id}_{session.stats['requests_count']}"
+                request_id=request_id
             )
             
             # Log results
@@ -150,12 +179,24 @@ class AiOneWrapper:
             
             if result.tool_results:
                 logger.debug(f"Executed {len(result.tool_results)} tools")
+                debug_component('wrapper', 'TOOLS_EXECUTED', {
+                    'tool_count': len(result.tool_results),
+                    'tool_names': [tr.get('tool', 'unknown') for tr in result.tool_results] if result.tool_results else []
+                })
+            
+            # Debug request completion
+            debug_request_end(request_id, result.status.value, result.execution_time_ms)
             
             # Return response in original format
             return session_id, result.response
             
         except Exception as e:
             logger.error(f"AI-ONE request failed: {e}", exc_info=True)
+            debug_component('wrapper', 'REQUEST_FAILED', {
+                'request_id': request_id,
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            })
             error_response = f"I encountered an error: {str(e)}"
             return session_id, error_response
     
