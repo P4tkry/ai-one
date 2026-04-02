@@ -1,6 +1,7 @@
 import subprocess
 import uuid
 import json
+import os
 from typing import List, Dict, Any, Union
 
 
@@ -52,13 +53,15 @@ def ask_question(
     if stream:
         command.extend(['--stream', 'on'])
 
-    print("COMMAND:", command)
-    
-    # Debug: show formatted messages if JSON
-    if isinstance(messages, list):
-        print("JSON MESSAGES:")
-        for i, msg in enumerate(messages):
-            print(f"  {i+1}. {msg.get('author', 'unknown')}: {msg.get('message', '')[:100]}...")
+    # Debug: show command and messages only in debug mode
+    if os.getenv("DEBUG"):
+        print("COMMAND:", command)
+        
+        # Debug: show formatted messages if JSON
+        if isinstance(messages, list):
+            print("JSON MESSAGES:")
+            for i, msg in enumerate(messages):
+                print(f"  {i+1}. {msg.get('author', 'unknown')}: {msg.get('message', '')[:100]}...")
 
     result = subprocess.run(
         command,
