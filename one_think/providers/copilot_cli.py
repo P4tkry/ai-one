@@ -8,7 +8,8 @@ def ask_question(
     messages: Union[str, List[Dict[str, str]]],
     model: str = 'gpt-4.1',
     session_id: str = None,
-    catalog: str = None
+    catalog: str = None,
+    stream: bool = False
 ) -> tuple[str | None, str]:
     """
     Ask question via Copilot CLI with JSON messages format.
@@ -21,6 +22,7 @@ def ask_question(
         model: LLM model to use
         session_id: Session ID for conversation continuity
         catalog: Working directory
+        stream: Enable streaming mode (--stream on)
     
     Returns:
         (session_id, response_text)
@@ -45,6 +47,10 @@ def ask_question(
             '--model', model,
             '-sp', messages_json
         ]
+    
+    # Add streaming option if enabled
+    if stream:
+        command.extend(['--stream', 'on'])
 
     print("COMMAND:", command)
     

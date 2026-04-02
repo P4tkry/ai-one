@@ -8,6 +8,7 @@ import time
 import requests
 from typing import Any, Optional
 from urllib.parse import urlparse
+from pydantic import BaseModel, Field, HttpUrl
 from one_think.tools.base import Tool, ToolResponse
 
 try:
@@ -33,6 +34,22 @@ class WebFetch(Tool):
     
     DEFAULT_LENGTH = None  # No limit
     DEFAULT_TIMEOUT = 10
+    
+    # Pydantic schemas for input/output validation
+    class Input(BaseModel):
+        """Input parameters for WebFetch tool."""
+        url: HttpUrl = Field(description="URL to fetch content from")
+        max_length: Optional[int] = Field(default=None, ge=1, description="Maximum content length (characters)")
+        timeout: Optional[int] = Field(default=10, ge=1, le=60, description="Timeout in seconds")
+        
+    class Output(BaseModel):  
+        """Output format for WebFetch tool."""
+        url: str = Field(description="Actual URL fetched (after redirects)")
+        title: str = Field(description="Page title if available")
+        content: str = Field(description="Extracted text content")
+        content_type: str = Field(description="Response content type")
+        length: int = Field(description="Content length in characters")
+        truncated: bool = Field(description="Whether content was truncated due to max_length")
     
     def execute_json(
         self,

@@ -531,11 +531,87 @@ class Executor:
         reason = refresh_request.reason or "System refresh requested"
         logger.info(f"System refresh requested: {reason}")
         
-        # Record system refresh request
-        logger.info(f"System refresh requested: {reason}")
-        session.set_metadata("last_system_refresh", reason)
+        # Build refreshed system prompt with current state
+        refreshed_prompt = self._build_refreshed_system_prompt(session, reason)
         
-        logger.debug("System refresh recorded in session metadata")
+        # Inject system message into conversation
+        system_message = SystemMessage(
+            content=refreshed_prompt,
+            timestamp=datetime.now(timezone.utc)
+        )
+        session.add_message(system_message)
+        
+        # Record refresh in session metadata with timestamp
+        refresh_count = session.get_metadata("system_refresh_count", 0) + 1
+        session.set_metadata("system_refresh_count", refresh_count)
+        session.set_metadata("last_system_refresh", reason)
+        session.set_metadata("last_system_refresh_time", datetime.now(timezone.utc).isoformat())
+        
+        # Log refresh event with debug info
+        debug_component('executor', 'SYSTEM_REFRESH', {
+            'reason': reason,
+            'refresh_count': refresh_count,
+            'prompt_length': len(refreshed_prompt),
+            'session_id': session.session_id
+        })
+        
+        logger.info(f"System refresh completed (#{refresh_count}): {len(refreshed_prompt)} chars")
+    
+    def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
+        """
+        Build a refreshed system prompt with current context.
+        
+        Args:
+            session: Current session for context
+            reason: Reason for refresh
+            
+        Returns:
+            Refreshed system prompt string
+        """
+        # Get base prompt
+        base_prompt = self._get_base_system_prompt()
+        
+        # Add session context summary
+        message_count = len(session.messages) if session.messages else 0
+        tool_count = session.stats.get('tool_calls', 0)
+        
+        # Build tools summary
+        available_tools = list(self.tool_registry.list_tools().keys())
+        tools_summary = f"Available tools ({len(available_tools)}): {', '.join(available_tools)}"
+        
+        # Construct refreshed prompt
+        refreshed_prompt = f"""{base_prompt}
+
+=== CONTEXT REFRESH ===
+Refresh reason: {reason}
+Session stats: {message_count} messages, {tool_count} tool calls
+{tools_summary}
+
+Continue the conversation with refreshed context and guidelines."""
+        
+        return refreshed_prompt
+        
+    def _get_base_system_prompt(self) -> str:
+        """Get base system prompt (same as default but modular)."""
+        return (
+            "You are an advanced AI assistant powered by AI-ONE tool system. "
+            
+            "CRITICAL: Always respond with valid JSON in one of these formats:\n"
+            
+            "1. For normal responses:\n"
+            '{"type": "response", "content": "your helpful answer here"}\n'
+            
+            "2. For tool requests:\n"
+            '{"type": "tool_request", "tools": [{"tool_name": "tool_name", "params": {...}, "id": "req_1"}]}\n'
+            
+            "3. For system refresh:\n"
+            '{"type": "system_refresh_request", "reason": "context full or need guidelines"}\n'
+            
+            f"Available tools: {', '.join(self.tool_registry.list_tools().keys())}\n"
+            
+            "Use tools when you need to gather information, execute code, or perform actions.\n"
+            "Always provide helpful, accurate responses in the specified JSON format."
+        )
     
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):

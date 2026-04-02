@@ -58,22 +58,72 @@ class Tool(ABC):
     Every tool must:
     1. Set `name` (unique identifier)
     2. Set `description` (one-line what it does)
-    3. Implement `execute_json()` method
-    4. Implement `get_help()` method
+    3. Define `Input` and `Output` Pydantic models for validation
+    4. Implement `execute_json()` method
+    5. Implement `get_help()` method
     
     Tools return ToolResponse with strict JSON structure.
+    Input/output parameters are automatically validated against Pydantic schemas.
     """
     
     name: str = "base_tool"
     description: str = "Base tool class"
     version: str = "1.0.0"
     
+    # Pydantic models for validation (must be overridden)
+    Input: type[BaseModel] = None
+    Output: type[BaseModel] = None
+    
     def __init__(self):
-        """Initialize tool."""
+        """Initialize tool with schema validation."""
         if self.name == "base_tool":
             raise NotImplementedError(
                 "Tool must set a unique 'name' class variable"
             )
+        
+        # Validate that Input/Output schemas are defined
+        if self.Input is None or self.Output is None:
+            # For backward compatibility, allow tools without schemas
+            # but log a warning for future migration
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Tool {self.name} lacks Input/Output schemas - consider adding for validation")
+    
+    def validate_input(self, params: dict[str, Any]) -> BaseModel:
+        """
+        Validate input parameters against Input schema.
+        
+        Args:
+            params: Raw input parameters
+            
+        Returns:
+            Validated Input model instance
+            
+        Raises:
+            ValidationError: If params don't match schema
+        """
+        if self.Input is None:
+            raise NotImplementedError(f"Tool {self.name} has no Input schema defined")
+        
+        return self.Input.model_validate(params)
+    
+    def validate_output(self, result: dict[str, Any]) -> BaseModel:
+        """
+        Validate output result against Output schema.
+        
+        Args:
+            result: Raw output result
+            
+        Returns:
+            Validated Output model instance
+            
+        Raises:
+            ValidationError: If result doesn't match schema
+        """
+        if self.Output is None:
+            raise NotImplementedError(f"Tool {self.name} has no Output schema defined")
+        
+        return self.Output.model_validate(result)
     
     @abstractmethod
     def execute_json(
@@ -119,7 +169,7 @@ class Tool(ABC):
         request_id: Optional[str] = None
     ) -> ToolResponse:
         """
-        Callable interface - wraps execute_json with timing and error handling.
+        Callable interface - wraps execute_json with validation, timing and error handling.
         
         Args:
             params: Tool parameters
@@ -132,33 +182,91 @@ class Tool(ABC):
         if params.get("help") is True:
             return self._create_help_response(request_id)
         
-        # Execute with timing
+        # Execute with timing and validation
         start_time = time.perf_counter()
         
         try:
+            # Validate input parameters if schema available
+            if self.Input is not None:
+                try:
+                    validated_input = self.validate_input(params)
+                    # Convert back to dict for execute_json
+                    params = validated_input.model_dump()
+                except Exception as e:
+                    return self._create_validation_error_response(
+                        f"Input validation failed: {str(e)}", 
+                        request_id, 
+                        start_time
+                    )
+            
+            # Execute tool
             response = self.execute_json(params=params, request_id=request_id)
             
-            # Ensure timing is set
-            if response.execution_time_ms == 0:
-                elapsed_ms = (time.perf_counter() - start_time) * 1000
-                response.execution_time_ms = elapsed_ms
+            # Validate output if schema available and response successful
+            if (self.Output is not None and 
+                response.status == "success" and 
+                response.result is not None):
+                try:
+                    validated_output = self.validate_output(response.result)
+                    # Update result with validated data
+                    response.result = validated_output.model_dump()
+                except Exception as e:
+                    # Convert success to validation error
+                    response.status = "error"
+                    response.error = {
+                        "type": "output_validation_error",
+                        "message": f"Output validation failed: {str(e)}",
+                        "original_result": response.result
+                    }
+                    response.result = None
             
-            # Ensure tool name is set
-            if response.tool != self.name:
-                response.tool = self.name
-            
+            # Ensure response has correct execution time
+            response.execution_time_ms = (time.perf_counter() - start_time) * 1000
             return response
-        
+            
         except Exception as e:
-            # Catch any uncaught exceptions and return error response
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            return self._create_error_response(
-                error_type="UnhandledException",
-                message=f"Tool raised unhandled exception: {type(e).__name__}",
-                details={"exception": str(e), "type": type(e).__name__},
-                request_id=request_id,
-                execution_time_ms=elapsed_ms
-            )
+            # Catch any other exceptions during execution
+            return self._create_execution_error_response(str(e), request_id, start_time)
+    
+    def _create_validation_error_response(
+        self, 
+        message: str, 
+        request_id: Optional[str], 
+        start_time: float
+    ) -> ToolResponse:
+        """Create validation error response."""
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        return ToolResponse(
+            status="error",
+            tool=self.name,
+            request_id=request_id,
+            error={
+                "type": "validation_error",
+                "message": message,
+                "tool": self.name
+            },
+            execution_time_ms=elapsed_ms
+        )
+    
+    def _create_execution_error_response(
+        self, 
+        message: str, 
+        request_id: Optional[str], 
+        start_time: float
+    ) -> ToolResponse:
+        """Create execution error response."""
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        return ToolResponse(
+            status="error",
+            tool=self.name,
+            request_id=request_id,
+            error={
+                "type": "execution_error", 
+                "message": message,
+                "tool": self.name
+            },
+            execution_time_ms=elapsed_ms
+        )
     
     def _create_success_response(
         self,

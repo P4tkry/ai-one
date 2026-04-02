@@ -74,12 +74,15 @@ class CopilotProvider(LLMProvider):
             # Use provided session_id for Copilot CLI --resume
             copilot_session_id = session_id
             
-            # Call Copilot CLI with JSON messages format
+            # Call Copilot CLI with JSON messages format and streaming if enabled
+            stream_enabled = kwargs.get('stream', False)
+            
             result_session_id, response_content = ask_question(
                 messages=json_messages,  # Structured JSON format
                 model=self.config.model,
                 session_id=copilot_session_id,
-                catalog=kwargs.get('catalog')
+                catalog=kwargs.get('catalog'),
+                stream=stream_enabled
             )
             
             # Update session ID for future requests
