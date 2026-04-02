@@ -491,7 +491,7 @@ class Executor:
             
             # Execute tool with parameters
             result = tool_instance.execute_json(
-                **tool_request.params,
+                params=tool_request.params,
                 request_id=request_id
             )
             
