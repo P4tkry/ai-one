@@ -66,7 +66,7 @@ class CopilotProvider(LLMProvider):
         
         try:
             # Import copilot functionality
-            from one_think.copilot import ask_question
+            from .copilot_cli import ask_question
             
             # Convert provider messages to JSON messages format
             json_messages = self._convert_messages_to_json(messages)
