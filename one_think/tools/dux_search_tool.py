@@ -1,17 +1,35 @@
 """
-Dux Search Tool - Full JSON migration
-Custom search functionality with structured responses
+Dux Search Tool - Full JSON migration with Pydantic schemas.
+Custom search functionality with structured responses and validation.
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal, List
+from pydantic import BaseModel, Field
 
 from one_think.tools.base import Tool, ToolResponse
 
 
 class DuxSearchTool(Tool):
-    """Custom search tool with structured responses."""
+    """Custom search tool with structured responses and validation."""
     
     name = "dux_search"
     description = "Performs custom search operations."
+    version = "2.0.0"
+    
+    # Pydantic schemas  
+    class Input(BaseModel):
+        """Input parameters for search operations."""
+        operation: Literal["search", "index", "query"] = Field(description="Search operation to perform")
+        query: Optional[str] = Field(default=None, description="Search query")
+        filters: Optional[Dict[str, Any]] = Field(default=None, description="Search filters")
+        limit: Optional[int] = Field(default=10, ge=1, le=100, description="Maximum results (1-100)")
+        
+    class Output(BaseModel):
+        """Output format for search operations."""
+        operation: str = Field(description="Operation performed")
+        query: Optional[str] = Field(description="Search query used")
+        results: List[Dict[str, Any]] = Field(description="Search results")
+        total_count: int = Field(description="Total number of results")
+        success: bool = Field(description="Whether operation succeeded")
     
     def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
         """Execute search operation with JSON response."""

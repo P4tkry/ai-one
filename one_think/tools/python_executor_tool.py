@@ -1,20 +1,21 @@
 """
-PythonExecutorTool - Full JSON migration
-Execute Python code with structured JSON responses
+PythonExecutorTool - Full JSON migration with Pydantic schemas.
+Execute Python code with structured JSON responses and validation.
 """
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Literal
+from pydantic import BaseModel, Field
 
 from one_think.tools.base import Tool, ToolResponse
 
 
 class PythonExecutorTool(Tool):
     """
-    Tool for executing Python scripts and code.
+    Tool for executing Python scripts and code with Pydantic validation.
 
     Execution modes:
     - secure:
@@ -33,6 +34,29 @@ class PythonExecutorTool(Tool):
 
     name = "python_executor"
     description = "Execute Python code or Python script files"
+    version = "2.0.0"
+    
+    # Pydantic schemas for validation
+    class Input(BaseModel):
+        """Input parameters for Python execution."""
+        operation: Literal["execute", "execute_file"] = Field(description="Operation type: execute code or execute file")
+        code: Optional[str] = Field(default=None, description="Python code to execute (for execute operation)")
+        file_path: Optional[str] = Field(default=None, description="Path to Python file (for execute_file operation)")
+        timeout: Optional[int] = Field(default=30, ge=1, le=300, description="Timeout in seconds (1-300)")
+        mode: Optional[Literal["secure", "insecure"]] = Field(default="secure", description="Execution mode")
+        raw_output: Optional[bool] = Field(default=False, description="Return raw output without processing")
+        working_dir: Optional[str] = Field(default=None, description="Working directory for execution")
+        
+    class Output(BaseModel):
+        """Output format for Python execution."""
+        operation: str = Field(description="Operation that was executed")
+        stdout: str = Field(description="Standard output from execution")
+        stderr: str = Field(description="Standard error from execution")
+        return_code: int = Field(description="Process return code (0=success)")
+        execution_time_ms: float = Field(description="Execution time in milliseconds")
+        mode: str = Field(description="Execution mode used")
+        timed_out: bool = Field(description="Whether execution timed out")
+        working_directory: Optional[str] = Field(description="Working directory used")
 
     def __init__(self) -> None:
         super().__init__()

@@ -1,12 +1,13 @@
 """
-Whisper Tool - Full JSON migration
-Audio transcription using OpenAI Whisper with structured responses
+Whisper Tool - Full JSON migration with Pydantic schemas.
+Audio transcription using OpenAI Whisper with structured responses and validation.
 """
 import os
 import json
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from one_think.tools.base import Tool, ToolResponse
@@ -23,6 +24,29 @@ except ImportError:
 
 
 class WhisperTool(Tool):
+    """Tool for audio transcription using OpenAI Whisper."""
+    
+    name = "whisper"
+    description = "Audio transcription using OpenAI Whisper"
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for audio transcription."""
+        operation: Literal["transcribe", "translate"] = Field(default="transcribe", description="Operation: transcribe or translate to English")
+        audio_file: Optional[str] = Field(default=None, description="Path to audio file")
+        audio_url: Optional[str] = Field(default=None, description="URL to audio file")
+        model_size: Optional[Literal["tiny", "base", "small", "medium", "large"]] = Field(default="base", description="Whisper model size")
+        language: Optional[str] = Field(default=None, description="Audio language (auto-detect if None)")
+        
+    class Output(BaseModel):
+        """Output format for transcription."""
+        operation: str = Field(description="Operation performed")
+        text: str = Field(description="Transcribed/translated text")
+        language: Optional[str] = Field(description="Detected language")
+        model_size: str = Field(description="Whisper model used")
+        confidence: Optional[float] = Field(description="Transcription confidence")
+        duration: Optional[float] = Field(description="Audio duration in seconds")
     """Tool for audio transcription using OpenAI Whisper."""
     
     name = "whisper"

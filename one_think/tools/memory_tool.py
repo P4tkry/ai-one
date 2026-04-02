@@ -1,10 +1,11 @@
 """
-MemoryTool - Full JSON migration
-Manages MEMORY.md file with structured JSON responses
+MemoryTool - Full JSON migration with Pydantic schemas.
+Manages MEMORY.md file with structured JSON responses and validation.
 """
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from one_think.tools.base import Tool, ToolResponse
@@ -17,6 +18,21 @@ class MemoryTool(Tool):
     
     name = "memory"
     description = "Manages the MEMORY.md file - important information and context the model should remember."
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for memory operations."""
+        operation: Literal["read", "write", "append"] = Field(description="Memory operation: read, write, or append")
+        content: Optional[str] = Field(default=None, description="Content to write/append (required for write/append)")
+        
+    class Output(BaseModel):
+        """Output format for memory operations."""
+        operation: str = Field(description="Operation that was performed")
+        content: Optional[str] = Field(description="Current memory content (for read operations)")
+        file_path: str = Field(description="Path to memory file")
+        success: bool = Field(description="Whether operation succeeded")
+        message: str = Field(description="Status message")
     
     def __init__(self) -> None:
         super().__init__()

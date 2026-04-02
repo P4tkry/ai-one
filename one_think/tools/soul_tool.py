@@ -1,12 +1,13 @@
 """
 Soul Tool - System instructions and behavior guidelines management.
 
-Migrated to new JSON format with strict validation and structured responses.
+Migrated to new JSON format with Pydantic schemas, validation and structured responses.
 """
 
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Literal
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from one_think.tools.base import Tool, ToolResponse
 
@@ -23,6 +24,24 @@ class SoulTool(Tool):
     - append: Add to existing content
     - clear: Remove all content
     """
+    
+    name = "soul"
+    description = "Manages system instructions and behavior guidelines (SOUL.md)"
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for soul operations."""
+        operation: Literal["read", "write", "append", "clear"] = Field(description="Soul operation: read, write, append, or clear")
+        content: Optional[str] = Field(default=None, description="Content to write/append (required for write/append)")
+        
+    class Output(BaseModel):
+        """Output format for soul operations."""
+        operation: str = Field(description="Operation that was performed")
+        content: Optional[str] = Field(description="Current soul content (for read operations)")
+        file_path: str = Field(description="Path to soul file")
+        success: bool = Field(description="Whether operation succeeded")
+        message: str = Field(description="Status message")
     
     name = "soul"
     description = "Manages SOUL.md file - system instructions and behavior guidelines"

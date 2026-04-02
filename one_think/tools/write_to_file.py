@@ -1,18 +1,35 @@
 """
-WriteToFile Tool - Full JSON migration
-Write content to files with structured responses
+WriteToFile Tool - Full JSON migration with Pydantic schemas.
+Write content to files with structured responses and validation.
 """
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 
 from one_think.tools.base import Tool, ToolResponse
 
 
 class WriteToFile(Tool):
-    """Tool for writing content to a file."""
+    """Tool for writing content to a file with validation."""
 
     name = "write_to_file"
     description = "Writes content to a file at a given path."
+    version = "2.0.0"
+
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for file writing."""
+        path: str = Field(description="Path to file to write")
+        content: str = Field(description="Content to write to file")
+        mode: Optional[Literal["w", "a", "x"]] = Field(default="w", description="Write mode: w (write), a (append), x (exclusive)")
+        
+    class Output(BaseModel):
+        """Output format for file writing."""
+        path: str = Field(description="Path to file that was written")
+        content_length: int = Field(description="Number of characters written")
+        mode: str = Field(description="Write mode used")
+        success: bool = Field(description="Whether write operation succeeded")
+        message: str = Field(description="Status message")
 
     DEFAULT_MODE = "w"
 

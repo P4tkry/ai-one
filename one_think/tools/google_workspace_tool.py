@@ -1,10 +1,11 @@
 """
-Google Workspace Tool - Full JSON migration
-Manages Google Workspace services with structured responses
+Google Workspace Tool - Full JSON migration with Pydantic schemas.
+Manages Google Workspace services with structured responses and validation.
 """
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal, List
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from one_think.tools.base import Tool, ToolResponse
@@ -25,11 +26,31 @@ except ImportError:
 
 
 class GoogleWorkspaceTool(Tool):
-    """Manages Google Workspace services: Gmail, Calendar, Tasks."""
+    """Tool for Google Workspace integration with structured responses."""
     
     name = "google_workspace"
-    description = "Manages Google Workspace services: Gmail, Calendar, Tasks."
+    description = "Google Workspace integration (Gmail, Drive, Calendar)"
+    version = "2.0.0"
     
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for Google Workspace operations."""
+        service: Literal["gmail", "drive", "calendar"] = Field(description="Google service to use")
+        operation: str = Field(description="Operation to perform")
+        query: Optional[str] = Field(default=None, description="Search query")
+        subject: Optional[str] = Field(default=None, description="Email subject")
+        body: Optional[str] = Field(default=None, description="Email body")
+        to: Optional[str] = Field(default=None, description="Email recipient")
+        file_name: Optional[str] = Field(default=None, description="File name")
+        
+    class Output(BaseModel):
+        """Output format for Google Workspace operations."""
+        service: str = Field(description="Google service used")
+        operation: str = Field(description="Operation performed")
+        success: bool = Field(description="Whether operation succeeded")
+        results: Optional[List[Dict[str, Any]]] = Field(description="Operation results")
+        error: Optional[str] = Field(description="Error message if failed")
+
     # Define scopes for Google APIs
     SCOPES = [
         'https://www.googleapis.com/auth/gmail.send',

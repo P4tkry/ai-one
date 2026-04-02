@@ -1,10 +1,11 @@
 """
-UserTool - Full JSON migration
-Manages USER.md file with structured JSON responses
+UserTool - Full JSON migration with Pydantic schemas.
+Manages USER.md file with structured JSON responses and validation.
 """
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from one_think.tools.base import Tool, ToolResponse
@@ -17,6 +18,21 @@ class UserTool(Tool):
     
     name = "user"
     description = "Manages the USER.md file - user information and preferences."
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for user operations."""
+        operation: Literal["read", "write", "append"] = Field(description="User operation: read, write, or append")
+        content: Optional[str] = Field(default=None, description="Content to write/append (required for write/append)")
+        
+    class Output(BaseModel):
+        """Output format for user operations."""
+        operation: str = Field(description="Operation that was performed")
+        content: Optional[str] = Field(description="Current user content (for read operations)")
+        file_path: str = Field(description="Path to user file")
+        success: bool = Field(description="Whether operation succeeded")
+        message: str = Field(description="Status message")
     
     def __init__(self) -> None:
         super().__init__()

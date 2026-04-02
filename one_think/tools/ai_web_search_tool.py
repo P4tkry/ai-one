@@ -1,10 +1,11 @@
 """
-AI Web Search Tool - Full JSON migration
-Performs AI-powered web search using Tavily API with structured responses
+AI Web Search Tool - Full JSON migration with Pydantic schemas.
+Performs AI-powered web search using Tavily API with structured responses and validation.
 """
 import os
 import requests
 from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, Field
 
 from one_think.tools.base import Tool, ToolResponse
 from dotenv import load_dotenv
@@ -17,6 +18,25 @@ class AIWebSearchTool(Tool):
     
     name = "ai_web_search"
     description = "Performs AI-powered web search using the Tavily API."
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for web search."""
+        query: str = Field(description="Search query")
+        max_results: Optional[int] = Field(default=5, ge=1, le=20, description="Maximum number of results (1-20)")
+        search_depth: Optional[str] = Field(default="basic", description="Search depth: basic or advanced")
+        include_answer: Optional[bool] = Field(default=True, description="Include AI-generated answer")
+        include_raw_content: Optional[bool] = Field(default=False, description="Include raw content")
+        
+    class Output(BaseModel):
+        """Output format for web search."""
+        query: str = Field(description="Search query that was executed")
+        answer: Optional[str] = Field(description="AI-generated answer")
+        results: List[Dict[str, Any]] = Field(description="Search results")
+        follow_up_questions: Optional[List[str]] = Field(description="Suggested follow-up questions")
+        search_depth: str = Field(description="Search depth used")
+        response_time: float = Field(description="Response time in seconds")
     
     API_URL = "https://api.tavily.com/search"
     DEFAULT_MAX_RESULTS = 5

@@ -1,10 +1,11 @@
 """
-Messenger Tool - Full JSON migration
-Facebook Messenger integration with structured responses
+Messenger Tool - Full JSON migration with Pydantic schemas.
+Facebook Messenger integration with structured responses and validation.
 """
 import os
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
+from pydantic import BaseModel, Field
 import requests
 from dotenv import load_dotenv
 
@@ -15,13 +16,31 @@ load_dotenv()
 
 class MessengerTool(Tool):
     """
-    Facebook Messenger Tool with structured JSON responses.
+    Facebook Messenger Tool with structured JSON responses and validation.
     
     Note: This is a v2 migration - full functionality needs to be restored.
     """
     
     name = "messenger"
     description = "Send and receive messages via Facebook Messenger."
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for messenger operations."""
+        operation: Literal["send", "receive", "get_profile"] = Field(description="Messenger operation")
+        recipient_id: Optional[str] = Field(default=None, description="Recipient ID (for send)")
+        message: Optional[str] = Field(default=None, description="Message to send")
+        user_id: Optional[str] = Field(default=None, description="User ID (for get_profile)")
+        
+    class Output(BaseModel):
+        """Output format for messenger operations."""
+        operation: str = Field(description="Operation performed")
+        success: bool = Field(description="Whether operation succeeded")
+        message_id: Optional[str] = Field(description="Message ID (for send)")
+        messages: Optional[List[Dict[str, Any]]] = Field(description="Messages (for receive)")
+        profile: Optional[Dict[str, Any]] = Field(description="User profile (for get_profile)")
+        error: Optional[str] = Field(description="Error message if failed")
     
     DEFAULT_LIST_LIMIT = 10
     DEFAULT_READ_LIMIT = 20

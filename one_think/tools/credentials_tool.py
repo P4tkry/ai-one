@@ -1,13 +1,14 @@
 """
-Credentials Tool - Full JSON migration
-Manages encrypted credentials in SQLite with structured responses
+Credentials Tool - Full JSON migration with Pydantic schemas.
+Manages encrypted credentials in SQLite with structured responses and validation.
 """
 import sqlite3
 import os
 import base64
 import json
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Literal
 from pathlib import Path
+from pydantic import BaseModel, Field
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -22,6 +23,27 @@ load_dotenv()
 
 class CredentialsTool(Tool):
     """Tool for managing encrypted credentials in SQLite."""
+    
+    name = "credentials"
+    description = "Manages encrypted credentials in SQLite database"
+    version = "2.0.0"
+    
+    # Pydantic schemas
+    class Input(BaseModel):
+        """Input parameters for credential operations."""
+        operation: Literal["store", "retrieve", "delete", "list"] = Field(description="Credential operation")
+        name: Optional[str] = Field(default=None, description="Credential name (required for store/retrieve/delete)")
+        value: Optional[str] = Field(default=None, description="Credential value (required for store)")
+        category: Optional[str] = Field(default="general", description="Credential category")
+        
+    class Output(BaseModel):
+        """Output format for credential operations."""
+        operation: str = Field(description="Operation that was performed")
+        name: Optional[str] = Field(description="Credential name")
+        value: Optional[str] = Field(description="Credential value (for retrieve)")
+        credentials: Optional[List[Dict[str, str]]] = Field(description="List of credentials (for list)")
+        success: bool = Field(description="Whether operation succeeded")
+        message: str = Field(description="Status message")
     
     name = "credentials"
     description = "Manages encrypted credentials stored in SQLite database."
