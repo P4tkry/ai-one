@@ -43,7 +43,7 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
     
     if wrapper.config.enable_tools:
         stats = wrapper.get_usage_stats()
-        tool_count = stats['executor'].get('tool_count', 0)
+        tool_count = stats['tools'].get('available_count', 0)
         print(f"Available tools: {tool_count}")
     
     print("\nType 'quit', 'exit', or 'q' to exit")
