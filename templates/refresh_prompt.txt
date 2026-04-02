@@ -1,0 +1,8 @@
+{{ base_prompt }}
+
+=== CONTEXT REFRESH ===
+Refresh reason: {{ reason }}
+Session stats: {{ message_count }} messages, {{ tool_count }} tool calls
+{{ tools_summary }}
+
+Continue the conversation with refreshed context and guidelines.

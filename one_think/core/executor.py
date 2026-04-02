@@ -559,7 +559,7 @@ class Executor:
     
     def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
         """
-        Build a refreshed system prompt with current context.
+        Build a refreshed system prompt with current context using templates.
         
         Args:
             session: Current session for context
@@ -568,6 +568,8 @@ class Executor:
         Returns:
             Refreshed system prompt string
         """
+        from ..templates import template_loader
+        
         # Get base prompt
         base_prompt = self._get_base_system_prompt()
         
@@ -576,42 +578,27 @@ class Executor:
         tool_count = session.stats.get('tool_calls', 0)
         
         # Build tools summary
-        available_tools = list(self.tool_registry.list_tools().keys())
+        available_tools = self.tool_registry.list_tools()
         tools_summary = f"Available tools ({len(available_tools)}): {', '.join(available_tools)}"
         
-        # Construct refreshed prompt
-        refreshed_prompt = f"""{base_prompt}
-
-=== CONTEXT REFRESH ===
-Refresh reason: {reason}
-Session stats: {message_count} messages, {tool_count} tool calls
-{tools_summary}
-
-Continue the conversation with refreshed context and guidelines."""
-        
-        return refreshed_prompt
+        # Use template loader to build refresh prompt
+        return template_loader.get_refresh_prompt(
+            base_prompt=base_prompt,
+            reason=reason,
+            message_count=message_count,
+            tool_count=tool_count,
+            tools_summary=tools_summary
+        )
         
     def _get_base_system_prompt(self) -> str:
         """Get base system prompt (same as default but modular)."""
-        return (
-            "You are an advanced AI assistant powered by AI-ONE tool system. "
-            
-            "CRITICAL: Always respond with valid JSON in one of these formats:\n"
-            
-            "1. For normal responses:\n"
-            '{"type": "response", "content": "your helpful answer here"}\n'
-            
-            "2. For tool requests:\n"
-            '{"type": "tool_request", "tools": [{"tool_name": "tool_name", "params": {...}, "id": "req_1"}]}\n'
-            
-            "3. For system refresh:\n"
-            '{"type": "system_refresh_request", "reason": "context full or need guidelines"}\n'
-            
-            f"Available tools: {', '.join(self.tool_registry.list_tools().keys())}\n"
-            
-            "Use tools when you need to gather information, execute code, or perform actions.\n"
-            "Always provide helpful, accurate responses in the specified JSON format."
-        )
+        from ..templates import template_loader
+        
+        # Get available tools list
+        available_tools = ', '.join(self.tool_registry.list_tools()) if self.tool_registry else ""
+        
+        # Load from template with fallback to hardcoded
+        return template_loader.get_system_prompt(available_tools=available_tools)
     
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):
