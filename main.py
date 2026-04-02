@@ -10,7 +10,13 @@ Usage:
     python main.py --legacy           # Legacy interface  
     python main.py --no-tools         # Modern without tools
     python main.py --model claude-4   # Specify model
+
+Automatically loads configuration from .env file.
 """
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 from modern_main import main
 

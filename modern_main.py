@@ -6,7 +6,13 @@ This script provides the modern AI-ONE command line interface with:
 - Tool integration via Tool Registry
 - Provider abstraction for LLM backends
 - Rich usage statistics and monitoring
+
+Automatically loads configuration from .env file.
 """
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 import argparse
 import logging
