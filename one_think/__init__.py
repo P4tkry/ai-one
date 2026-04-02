@@ -1,113 +1,85 @@
 """
-AI-ONE - Advanced AI Assistant with Tool Integration
+AI-ONE
 
-Modern AI assistant built on GitHub Copilot CLI with structured conversation
-management, comprehensive tool ecosystem, and clean provider abstraction.
+Modern AI assistant with structured conversation
+management, tool integration, and provider abstraction.
 
-Architecture:
-- Core: Session management, protocol parsing, execution engine
-- Providers: LLM provider integrations (Copilot CLI, OpenAI, etc.)  
-- Tools: Extensible tool ecosystem for AI capabilities
+This package provides:
+- Modern architecture with Executor + Provider + Session + Tools
+- Backward-compatible simple interface via run()
+- Rich conversation management via AiOneWrapper
 
 Usage:
-    # Modern interface (recommended)
-    python main.py
-
-    # Legacy simple interface
-    python main.py --legacy
+    # Simple backward-compatible interface
+    from one_think import run
+    run()
+    
+    # Modern wrapper interface  
+    from one_think import AiOneWrapper, ask_question
+    wrapper = AiOneWrapper()
+    session_id, response = wrapper.ask_question("Hello")
+    
+    # Or use the convenience function
+    session_id, response = ask_question("Hello")
 """
 
-# Core imports for external use
-from one_think.core.session import Session
-from one_think.core.executor import Executor
-from one_think.core.protocol import Protocol
-from one_think.providers import create_provider, CopilotProvider
-from one_think.copilot_wrapper import CopilotWrapper
+from .aione_wrapper import (
+    AiOneWrapper,
+    AiOneConfig, 
+    ask_question,
+    get_aione_wrapper,
+    configure_aione,
+    get_aione_stats
+)
 
-# Tool imports
-from one_think.tools.ai_web_search_tool import AIWebSearchTool
-from one_think.tools.credentials_tool import CredentialsTool
-from one_think.tools.dux_search_tool import DuxSearchTool
-from one_think.tools.google_workspace_tool import GoogleWorkspaceTool
-from one_think.tools.memory_tool import MemoryTool
-from one_think.tools.messenger_tool import MessengerTool
-from one_think.tools.python_executor_tool import PythonExecutorTool
-from one_think.tools.soul_tool import SoulTool
-from one_think.tools.user_tool import UserTool
-from one_think.tools.web_fetch import WebFetch
-from one_think.tools.whisper_tool import WhisperTool
-from one_think.tools.write_to_file import WriteToFile
-
-VERSION = "1.0.0"
-
-# Legacy function for backward compatibility
+# Legacy simple interface (using modern wrapper internally)
 def run():
     """
-    DEPRECATED: Legacy simple conversation loop.
+    Run the simple conversation loop (backward compatibility).
     
-    This function is kept for backward compatibility only.
-    Use CopilotWrapper or main_modern.py for new implementations.
+    This is the original simple interface, now powered by
+    the modern architecture internally.
     """
-    import warnings
-    warnings.warn(
-        "run() is deprecated. Use CopilotWrapper or main_modern.py instead.", 
-        DeprecationWarning, 
-        stacklevel=2
-    )
+    print("🚀 AI-ONE Simple Interface")
+    print("Type 'quit', 'exit', or 'q' to exit")
+    print("-" * 40)
     
-    # Simple fallback using new architecture
-    from one_think.copilot_wrapper import CopilotWrapper
+    session_id = None
     
-    print("🚀 AI-ONE Legacy Interface")
-    print("Note: This is a compatibility mode. Use 'python main.py' for full features.")
-    print("=" * 60)
-    
-    wrapper = CopilotWrapper()
-    
-    while True:
-        try:
-            prompt = input("\nEnter your prompt: ").strip()
-            if not prompt:
+    try:
+        while True:
+            user_input = input("👤 You: ").strip()
+            
+            if not user_input:
                 continue
                 
-            if prompt.lower() in ['quit', 'exit', 'q']:
+            if user_input.lower() in ['quit', 'exit', 'q']:
                 print("👋 Goodbye!")
                 break
-                
-            session_id, response = wrapper.ask_question(prompt)
-            print(f"\n🤖 Response: {response}")
             
-        except KeyboardInterrupt:
-            print("\n👋 Goodbye!")
-            break
-        except Exception as e:
-            print(f"\n❌ Error: {e}")
+            try:
+                print("🤖 AI: ", end="", flush=True)
+                session_id, response = ask_question(user_input, session_id)
+                print(response)
+                print()
+            except KeyboardInterrupt:
+                print("\n⏸️  Request interrupted")
+                continue
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                continue
+                
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
 
 
+# Export main components
 __all__ = [
-    # Core components
-    'Session',
-    'Executor', 
-    'Protocol',
-    'CopilotWrapper',
-    'create_provider',
-    'CopilotProvider',
-    
-    # Tools
-    'AIWebSearchTool',
-    'CredentialsTool', 
-    'DuxSearchTool',
-    'GoogleWorkspaceTool',
-    'MemoryTool',
-    'MessengerTool', 
-    'PythonExecutorTool',
-    'SoulTool',
-    'UserTool',
-    'WebFetch',
-    'WhisperTool',
-    'WriteToFile',
-    
-    # Legacy
     'run',
-    'VERSION'
+    'AiOneWrapper',
+    'AiOneConfig',
+    'ask_question', 
+    'get_aione_wrapper',
+    'configure_aione',
+    'get_aione_stats'
 ]

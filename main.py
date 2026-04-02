@@ -12,7 +12,7 @@ Usage:
     python main.py --model claude-4   # Specify model
 """
 
-from one_think.main_modern import main
+from modern_main import main
 
 if __name__ == "__main__":
     main()

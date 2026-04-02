@@ -14,7 +14,8 @@ from one_think.tools.base import Tool, ToolResponse
 load_dotenv()
 
 try:
-    import whisper
+    # Lazy import - only import when needed to avoid torch warnings
+    # import whisper  # moved to execute() method
     import requests
     WHISPER_AVAILABLE = True
 except ImportError:
@@ -108,6 +109,16 @@ class WhisperTool(Tool):
         request_id: Optional[str]
     ) -> ToolResponse:
         """Transcribe local audio file."""
+        
+        # Lazy import whisper to avoid torch warnings during module loading
+        try:
+            import whisper
+        except ImportError:
+            return self._create_error_response(
+                "Whisper library not available. Please install: pip install openai-whisper",
+                request_id=request_id
+            )
+        
         # Check if file exists
         if not os.path.exists(file_path):
             return self._create_error_response(
@@ -157,6 +168,16 @@ class WhisperTool(Tool):
         request_id: Optional[str]
     ) -> ToolResponse:
         """Transcribe audio from URL."""
+        
+        # Lazy import whisper to avoid torch warnings during module loading
+        try:
+            import whisper
+        except ImportError:
+            return self._create_error_response(
+                "Whisper library not available. Please install: pip install openai-whisper",
+                request_id=request_id
+            )
+            
         try:
             # Download audio temporarily
             response = requests.get(url, timeout=60)

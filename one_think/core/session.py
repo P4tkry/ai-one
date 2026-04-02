@@ -1,14 +1,14 @@
 """
-Session management for AI-ONE conversations with GitHub Copilot CLI.
+Session management for AI-ONE conversations.
 
-Session provides thin wrapper around Copilot CLI's native session management.
-Instead of duplicating conversation history, we leverage Copilot's --resume functionality.
+Session provides thin wrapper around the LLM provider's native session management.
+Instead of duplicating conversation history, we leverage provider's session functionality.
 
 Key changes:
-- Session.id maps directly to Copilot CLI --resume session_id
-- No message history storage (Copilot CLI handles this)
+- Session.id maps directly to provider's session management
+- No message history storage (provider handles this)
 - Focus on metadata, statistics, and session lifecycle
-- Direct integration with copilot --resume={session_id}
+- Direct integration with provider session management
 """
 
 from datetime import datetime, timezone
@@ -18,17 +18,17 @@ import uuid
 
 class Session:
     """
-    Thin wrapper for GitHub Copilot CLI sessions.
+    Session state management for AI-ONE.
     
     This class doesn't store conversation history - that's handled by 
-    Copilot CLI via --resume={session_id}. Instead, it manages:
+    the LLM provider. Instead, it manages:
     - Session metadata and preferences
     - Usage statistics and metrics  
     - Session lifecycle (creation, cleanup)
-    - Mapping between AI-ONE and Copilot CLI sessions
+    - Mapping between AI-ONE and provider sessions
     
     Attributes:
-        id: Session ID that maps to Copilot CLI --resume parameter
+        id: Session ID that maps to provider session parameter
         created_at: Session creation timestamp
         metadata: Session metadata (user preferences, config overrides)
         stats: Session usage statistics
@@ -41,7 +41,7 @@ class Session:
         metadata: Optional[Dict[str, Any]] = None
     ):
         """
-        Initialize session wrapper.
+        Initialize session state.
         
         Args:
             session_id: Custom session ID (generates UUID if not provided)
