@@ -56,6 +56,13 @@ class MessengerTool(Tool):
     def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
         """Execute Messenger operation with JSON response."""
         
+        # Check for help request first
+        if params.get("help"):
+            return self._create_success_response(
+                result={"help": self.get_help()},
+                request_id=request_id
+            )
+        
         # Check configuration
         if not self.page_access_token:
             return self._create_error_response(

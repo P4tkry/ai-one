@@ -91,6 +91,14 @@ This section defines how the system should behave and operate.
         Returns:
             ToolResponse with operation result
         """
+        
+        # Check for help request first
+        if params.get("help"):
+            return self._create_success_response(
+                result={"help": self.get_help()},
+                request_id=request_id
+            )
+        
         start_time = time.perf_counter()
         
         # Validate operation parameter

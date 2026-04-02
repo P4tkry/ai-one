@@ -69,6 +69,13 @@ class GoogleWorkspaceTool(Tool):
     def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
         """Execute Google Workspace operation with JSON response."""
         
+        # Check for help request first
+        if params.get("help"):
+            return self._create_success_response(
+                result={"help": self.get_help()},
+                request_id=request_id
+            )
+        
         # Check if APIs are available
         if not GOOGLE_APIS_AVAILABLE:
             return self._create_error_response(

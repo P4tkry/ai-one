@@ -60,6 +60,13 @@ This file stores important information that the model should remember across ses
     def execute_json(self, params: Dict[str, Any], request_id: Optional[str] = None) -> ToolResponse:
         """Execute memory operation with JSON response."""
         
+        # Check for help request first
+        if params.get("help"):
+            return self._create_success_response(
+                result={"help": self.get_help()},
+                request_id=request_id
+            )
+        
         # Validate required params
         error = self.validate_required_params(params, required=["operation"])
         if error:

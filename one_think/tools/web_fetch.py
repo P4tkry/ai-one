@@ -70,6 +70,14 @@ class WebFetch(Tool):
         Returns:
             ToolResponse with content in result.data
         """
+        
+        # Check for help request first
+        if params.get("help"):
+            return self._create_success_response(
+                result={"help": self.get_help()},
+                request_id=request_id
+            )
+        
         start_time = time.perf_counter()
         
         # Validate required params
