@@ -9,6 +9,7 @@ Architecture:
 """
 
 import json
+import json
 import logging
 import traceback
 from datetime import datetime, timezone
@@ -217,9 +218,8 @@ class Executor:
         
         Key changes for Copilot integration:
         - No message history management (handled by Copilot CLI --resume)
-        - Send only current prompt to LLM via Provider
-        - Session tracks statistics, not conversation history
-        - Tool results handled locally for protocol parsing
+        - Build messages incrementally for each iteration including tool results
+        - Send structured JSON messages to LLM via Provider
         
         Returns:
             (final_response, tool_results, errors)
@@ -228,6 +228,9 @@ class Executor:
         errors = []
         iteration = 0
         
+        # Build initial message context
+        accumulated_tool_results = []  # Track tool results across iterations
+        
         while iteration < self.max_tool_iterations:
             iteration += 1
             logger.debug(f"Conversation loop iteration {iteration}")
@@ -235,7 +238,7 @@ class Executor:
             # Send current request to LLM via Copilot CLI session
             try:
                 llm_response_text = self._call_llm_provider(
-                    session, user_input, system_prompt
+                    session, user_input, system_prompt, accumulated_tool_results
                 )
                 logger.debug(f"LLM response ({len(llm_response_text)} chars): {llm_response_text[:200]}...")
             except Exception as e:
@@ -273,6 +276,9 @@ class Executor:
                 tool_results.extend(iteration_tool_results)
                 errors.extend(iteration_errors)
                 
+                # Add tool results to accumulated results for next iteration
+                accumulated_tool_results.extend(iteration_tool_results)
+                
             elif parse_result.type == ResponseType.SYSTEM_REFRESH_REQUEST:
                 # Handle system refresh request
                 self._handle_system_refresh(parse_result, session)
@@ -296,19 +302,21 @@ class Executor:
         self, 
         session: Session,
         user_input: str,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        tool_results: Optional[List[ToolResponse]] = None
     ) -> str:
         """
         Call LLM provider with current request and session context.
         
-        With Copilot CLI integration, we don't send conversation history
-        - that's handled by Copilot CLI --resume. We only send the current
-        prompt and let Copilot CLI manage session continuity.
+        With Copilot CLI integration and JSON format:
+        - Build messages array including system prompt, user input, and tool results
+        - Send as JSON to Copilot CLI which manages session continuity via --resume
         
         Args:
             session: Session for statistics and session_id 
             user_input: Current user prompt
             system_prompt: Optional system prompt override
+            tool_results: Tool results from previous iterations to include in context
             
         Returns:
             Raw LLM response text
@@ -320,7 +328,7 @@ class Executor:
             raise LLMProviderError("No LLM provider configured")
         
         try:
-            # Create current message set (minimal for Copilot CLI)
+            # Create current message set with JSON structure
             messages = []
             
             # Add system prompt if provided
@@ -329,6 +337,22 @@ class Executor:
             
             # Add current user input
             messages.append({"role": "user", "content": user_input})
+            
+            # Add tool results if available
+            if tool_results:
+                for tool_result in tool_results:
+                    # Convert ToolResponse to message format
+                    tool_content = {
+                        "tool_name": tool_result.tool_name,
+                        "success": tool_result.success,
+                        "result": tool_result.result,
+                        "error": tool_result.error,
+                        "execution_time_ms": tool_result.execution_time_ms
+                    }
+                    messages.append({
+                        "role": "tool", 
+                        "content": json.dumps(tool_content, ensure_ascii=False)
+                    })
             
             # Check if provider is a Provider instance or function
             from one_think.providers import LLMProvider as BaseProvider

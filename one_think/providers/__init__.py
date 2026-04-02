@@ -285,18 +285,17 @@ class CopilotProvider(LLMProvider):
         
         try:
             # Import copilot functionality
-            from one_think.copilot import ask_question
+            from one_think.copilot import ask_question, build_messages
             
-            # Extract current user prompt from messages
-            # Since Copilot CLI handles history with --resume, we only send the latest prompt
-            prompt = self._extract_current_prompt(messages)
+            # Convert provider messages to JSON messages format
+            json_messages = self._convert_messages_to_json(messages)
             
             # Use provided session_id for Copilot CLI --resume
             copilot_session_id = session_id
             
-            # Call Copilot CLI with session continuity
+            # Call Copilot CLI with JSON messages format
             result_session_id, response_content = ask_question(
-                prompt=prompt,
+                messages=json_messages,  # Now using JSON format
                 model=self.config.model,
                 session_id=copilot_session_id,
                 catalog=kwargs.get('catalog')
@@ -339,6 +338,48 @@ class CopilotProvider(LLMProvider):
                 raise ProviderConnectionError(f"Copilot CLI failed: {e}") from e
             else:
                 raise ProviderError(f"Copilot provider error: {e}") from e
+    
+    def _convert_messages_to_json(self, messages: List[ProviderMessage]) -> List[Dict[str, str]]:
+        """
+        Convert provider messages to JSON format for Copilot CLI.
+        
+        Args:
+            messages: Provider messages
+            
+        Returns:
+            List of JSON message objects with 'author' and 'message' fields
+        """
+        json_messages = []
+        
+        for message in messages:
+            if message.role == "system":
+                json_messages.append({
+                    "author": "system",
+                    "message": message.content
+                })
+            elif message.role == "user":
+                json_messages.append({
+                    "author": "user", 
+                    "message": message.content
+                })
+            elif message.role == "assistant":
+                json_messages.append({
+                    "author": "assistant",
+                    "message": message.content
+                })
+            elif message.role == "tool":
+                json_messages.append({
+                    "author": "tool",
+                    "message": message.content
+                })
+            else:
+                # Handle custom roles
+                json_messages.append({
+                    "author": message.role,
+                    "message": message.content
+                })
+        
+        return json_messages
     
     def _extract_current_prompt(self, messages: List[ProviderMessage]) -> str:
         """
