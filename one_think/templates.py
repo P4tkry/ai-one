@@ -1,7 +1,7 @@
 """
-Prompt Templates System for AI-ONE.
+Prompt Instructions System for AI-ONE.
 
-Loads and renders prompt templates from templates/ directory using Jinja2.
+Loads and renders prompt instructions from prompt_instructions/ directory using Jinja2.
 Supports variable substitution and template logic for customizable prompts.
 """
 
@@ -11,58 +11,58 @@ from typing import Dict, Any, Optional
 from jinja2 import Environment, FileSystemLoader, Template
 
 
-class PromptTemplateLoader:
+class PromptInstructionLoader:
     """
-    Loads and renders prompt templates using Jinja2.
+    Loads and renders prompt instructions using Jinja2.
     
-    Templates are stored in templates/ directory and can contain variables
+    Instructions are stored in prompt_instructions/ directory and can contain variables
     that are substituted at runtime using {{ variable }} syntax.
     """
     
-    def __init__(self, templates_dir: Optional[str] = None):
+    def __init__(self, instructions_dir: Optional[str] = None):
         """
-        Initialize template loader.
+        Initialize instruction loader.
         
         Args:
-            templates_dir: Path to templates directory (default: templates/)
+            instructions_dir: Path to instructions directory (default: one_think/prompt_instructions/)
         """
-        if templates_dir is None:
-            # Default to templates/ in project root
-            project_root = Path(__file__).parent.parent
-            templates_dir = project_root / "templates"
+        if instructions_dir is None:
+            # Default to prompt_instructions/ in one_think package
+            package_root = Path(__file__).parent
+            instructions_dir = package_root / "prompt_instructions"
         
-        self.templates_dir = Path(templates_dir)
+        self.instructions_dir = Path(instructions_dir)
         
         # Initialize Jinja2 environment
-        if self.templates_dir.exists():
-            loader = FileSystemLoader(str(self.templates_dir))
+        if self.instructions_dir.exists():
+            loader = FileSystemLoader(str(self.instructions_dir))
             self.env = Environment(loader=loader, trim_blocks=True, lstrip_blocks=True)
         else:
             self.env = None
     
-    def load_template(self, template_name: str, **variables) -> str:
+    def load_instruction(self, instruction_name: str, **variables) -> str:
         """
-        Load and render a template with variables.
+        Load and render an instruction with variables.
         
         Args:
-            template_name: Name of template file (e.g., 'system_prompt.txt')
-            **variables: Variables to substitute in template
+            instruction_name: Name of instruction file (e.g., 'system_prompt.txt')
+            **variables: Variables to substitute in instruction
             
         Returns:
-            Rendered template string
+            Rendered instruction string
             
         Raises:
-            FileNotFoundError: If template file doesn't exist
-            ValueError: If templates directory not found
+            FileNotFoundError: If instruction file doesn't exist
+            ValueError: If instructions directory not found
         """
         if self.env is None:
-            raise ValueError(f"Templates directory not found: {self.templates_dir}")
+            raise ValueError(f"Instructions directory not found: {self.instructions_dir}")
         
         try:
-            template = self.env.get_template(template_name)
+            template = self.env.get_template(instruction_name)
             return template.render(**variables)
         except Exception as e:
-            raise FileNotFoundError(f"Template '{template_name}' not found or invalid: {e}")
+            raise FileNotFoundError(f"Instruction '{instruction_name}' not found or invalid: {e}")
     
     def get_system_prompt(self, available_tools: str = "") -> str:
         """
@@ -75,9 +75,9 @@ class PromptTemplateLoader:
             Rendered system prompt
         """
         try:
-            return self.load_template('system_prompt.txt', available_tools=available_tools)
+            return self.load_instruction('system_prompt.txt', available_tools=available_tools)
         except (FileNotFoundError, ValueError):
-            # Fallback to hardcoded prompt if template not available
+            # Fallback to hardcoded prompt if instruction not available
             return self._get_fallback_system_prompt(available_tools)
     
     def get_refresh_prompt(
@@ -91,9 +91,17 @@ class PromptTemplateLoader:
         """
         Get the system refresh prompt with context.
         
+        REFRESH PROMPT is used when:
+        - Context becomes too long (message_count high)
+        - LLM stops following JSON format 
+        - Tools change during session
+        - System needs to "reset" while preserving session context
+        
+        It's like restarting the system prompt but with current session state.
+        
         Args:
             base_prompt: Base system prompt
-            reason: Reason for refresh
+            reason: Reason for refresh (e.g., "context full", "format error")
             message_count: Number of messages in session
             tool_count: Number of tool calls made
             tools_summary: Summary of available tools
@@ -102,7 +110,7 @@ class PromptTemplateLoader:
             Rendered refresh prompt
         """
         try:
-            return self.load_template(
+            return self.load_instruction(
                 'refresh_prompt.txt',
                 base_prompt=base_prompt,
                 reason=reason,
@@ -114,15 +122,15 @@ class PromptTemplateLoader:
             # Fallback to simple concatenation
             return f"""{base_prompt}
 
-=== CONTEXT REFRESH ===
+=== SYSTEM REFRESH ===
 Refresh reason: {reason}
-Session stats: {message_count} messages, {tool_count} tool calls
+Session context: {message_count} messages, {tool_count} tool calls
 {tools_summary}
 
-Continue the conversation with refreshed context and guidelines."""
+IMPORTANT: Return to strict JSON format and follow all original guidelines."""
     
     def _get_fallback_system_prompt(self, available_tools: str) -> str:
-        """Fallback system prompt when template not available."""
+        """Fallback system prompt when instruction not available."""
         return f"""You are an advanced AI assistant powered by AI-ONE tool system.
 
 CRITICAL: Always respond with valid JSON in one of these formats:
@@ -142,5 +150,5 @@ Use tools when you need to gather information, execute code, or perform actions.
 Always provide helpful, accurate responses in the specified JSON format."""
 
 
-# Global template loader instance
-template_loader = PromptTemplateLoader()
+# Global instruction loader instance
+instruction_loader = PromptInstructionLoader()

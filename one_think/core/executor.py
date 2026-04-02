@@ -559,7 +559,7 @@ class Executor:
     
     def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
         """
-        Build a refreshed system prompt with current context using templates.
+        Build a refreshed system prompt with current context using instructions.
         
         Args:
             session: Current session for context
@@ -568,7 +568,7 @@ class Executor:
         Returns:
             Refreshed system prompt string
         """
-        from ..templates import template_loader
+        from ..templates import instruction_loader
         
         # Get base prompt
         base_prompt = self._get_base_system_prompt()
@@ -581,8 +581,8 @@ class Executor:
         available_tools = self.tool_registry.list_tools()
         tools_summary = f"Available tools ({len(available_tools)}): {', '.join(available_tools)}"
         
-        # Use template loader to build refresh prompt
-        return template_loader.get_refresh_prompt(
+        # Use instruction loader to build refresh prompt
+        return instruction_loader.get_refresh_prompt(
             base_prompt=base_prompt,
             reason=reason,
             message_count=message_count,
@@ -592,13 +592,13 @@ class Executor:
         
     def _get_base_system_prompt(self) -> str:
         """Get base system prompt (same as default but modular)."""
-        from ..templates import template_loader
+        from ..templates import instruction_loader
         
         # Get available tools list
         available_tools = ', '.join(self.tool_registry.list_tools()) if self.tool_registry else ""
         
-        # Load from template with fallback to hardcoded
-        return template_loader.get_system_prompt(available_tools=available_tools)
+        # Load from instruction with fallback to hardcoded
+        return instruction_loader.get_system_prompt(available_tools=available_tools)
     
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):

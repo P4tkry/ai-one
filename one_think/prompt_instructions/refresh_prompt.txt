@@ -1,0 +1,16 @@
+=== SYSTEM REFRESH ===
+
+{{ base_prompt }}
+
+**REFRESH CONTEXT:**
+- Reason: {{ reason }}
+- Session: {{ message_count }} messages, {{ tool_count }} tool calls  
+- {{ tools_summary }}
+
+**CRITICAL REMINDER:**
+- ALWAYS respond in strict JSON format
+- Follow original guidelines exactly
+- Use tools when needed for accurate information
+- Maintain helpful, professional tone
+
+Continue the conversation with refreshed instructions and full context awareness.
