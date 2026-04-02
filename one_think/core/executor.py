@@ -577,9 +577,8 @@ class Executor:
         message_count = len(session.messages) if session.messages else 0
         tool_count = session.stats.get('tool_calls', 0)
         
-        # Build tools summary
-        available_tools = self.tool_registry.list_tools()
-        tools_summary = f"Available tools ({len(available_tools)}): {', '.join(available_tools)}"
+        # Build tools summary  
+        tools_summary = self.tool_registry.get_tools_formatted("detailed") if self.tool_registry else "No tools available"
         
         # Use instruction loader to build refresh prompt
         return instruction_loader.get_refresh_prompt(
@@ -594,11 +593,8 @@ class Executor:
         """Get base system prompt (same as default but modular)."""
         from ..templates import instruction_loader
         
-        # Get available tools list
-        available_tools = ', '.join(self.tool_registry.list_tools()) if self.tool_registry else ""
-        
-        # Load from instruction with fallback to hardcoded
-        return instruction_loader.get_system_prompt(available_tools=available_tools)
+        # Load from instruction with detailed tool descriptions
+        return instruction_loader.get_system_prompt(tool_registry=self.tool_registry)
     
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):

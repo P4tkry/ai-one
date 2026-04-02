@@ -11,7 +11,8 @@ CRITICAL: Always respond with valid JSON in one of these formats:
 3. For system refresh:
 {"type": "system_refresh_request", "reason": "context full or need guidelines"}
 
-Available tools: {{ available_tools }}
+Available tools:
+{{ available_tools }}
 
 Use tools when you need to gather information, execute code, or perform actions.
 Always provide helpful, accurate responses in the specified JSON format.

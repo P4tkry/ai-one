@@ -64,17 +64,23 @@ class PromptInstructionLoader:
         except Exception as e:
             raise FileNotFoundError(f"Instruction '{instruction_name}' not found or invalid: {e}")
     
-    def get_system_prompt(self, available_tools: str = "") -> str:
+    def get_system_prompt(self, tool_registry=None) -> str:
         """
         Get the main system prompt with tool information.
         
         Args:
-            available_tools: Comma-separated list of available tools
+            tool_registry: Optional tool registry for detailed tool info
             
         Returns:
             Rendered system prompt
         """
         try:
+            # Generate formatted tools list
+            if tool_registry:
+                available_tools = tool_registry.get_tools_formatted("detailed")
+            else:
+                available_tools = ""
+                
             return self.load_instruction('system_prompt.txt', available_tools=available_tools)
         except (FileNotFoundError, ValueError):
             # Fallback to hardcoded prompt if instruction not available

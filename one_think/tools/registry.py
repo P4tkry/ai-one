@@ -300,6 +300,43 @@ class ToolRegistry:
             
         return self._metadata.copy()
     
+    def get_tools_formatted(self, format_style: str = "list") -> str:
+        """
+        Get tools in formatted string representation.
+        
+        Args:
+            format_style: Format style ("list", "detailed", "compact")
+                - "list": "tool1, tool2, tool3"
+                - "detailed": "tool1 - description1\ntool2 - description2"  
+                - "compact": "tool1 - short desc, tool2 - short desc"
+        
+        Returns:
+            Formatted tools string
+        """
+        if not self._discovery_performed:
+            self.discover_tools()
+        
+        if format_style == "list":
+            return ', '.join(self.list_tools())
+        
+        elif format_style == "detailed":
+            lines = []
+            for tool_name, metadata in self._metadata.items():
+                lines.append(f"{tool_name} - {metadata.description}")
+            return '\n'.join(lines)
+        
+        elif format_style == "compact":
+            items = []
+            for tool_name, metadata in self._metadata.items():
+                # Use first sentence of description for compact format
+                short_desc = metadata.description.split('.')[0] if '.' in metadata.description else metadata.description
+                items.append(f"{tool_name} - {short_desc}")
+            return ', '.join(items)
+        
+        else:
+            raise ValueError(f"Unknown format style: {format_style}")
+    
+    
     def validate_tool_implementation(self, tool_name: str) -> List[str]:
         """
         Validate that a tool is properly implemented.

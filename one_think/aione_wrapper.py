@@ -214,11 +214,8 @@ class AiOneWrapper:
         """Get default system prompt for AI-ONE with tool integration from instructions."""
         from .templates import instruction_loader
         
-        # Get available tools list
-        available_tools = ', '.join(self.tool_registry.list_tools()) if self.tool_registry else ""
-        
-        # Load from instruction with fallback to hardcoded
-        return instruction_loader.get_system_prompt(available_tools=available_tools)
+        # Load from instruction with detailed tool descriptions
+        return instruction_loader.get_system_prompt(tool_registry=self.tool_registry)
     
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
