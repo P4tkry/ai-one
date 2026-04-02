@@ -181,7 +181,7 @@ class AiOneWrapper:
                 logger.debug(f"Executed {len(result.tool_results)} tools")
                 debug_component('wrapper', 'TOOLS_EXECUTED', {
                     'tool_count': len(result.tool_results),
-                    'tool_names': [tr.get('tool', 'unknown') for tr in result.tool_results] if result.tool_results else []
+                    'tool_names': [tr.tool for tr in result.tool_results] if result.tool_results else []
                 })
             
             # Debug request completion

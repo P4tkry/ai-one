@@ -360,8 +360,8 @@ class Executor:
                 for tool_result in tool_results:
                     # Convert ToolResponse to message format
                     tool_content = {
-                        "tool_name": tool_result.tool_name,
-                        "success": tool_result.success,
+                        "tool_name": tool_result.tool,
+                        "success": tool_result.status == "success",
                         "result": tool_result.result,
                         "error": tool_result.error,
                         "execution_time_ms": tool_result.execution_time_ms

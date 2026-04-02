@@ -243,7 +243,12 @@ class ToolRegistry:
         """
         try:
             tool_class = self.get_tool(tool_name)
-            instance = tool_class(**init_kwargs)
+            
+            # Special handling for tool_help - pass registry reference
+            if tool_name == "tool_help":
+                instance = tool_class(tool_registry=self, **init_kwargs)
+            else:
+                instance = tool_class(**init_kwargs)
             
             # Cache the instance for reuse
             cache_key = f"{tool_name}_{hash(frozenset(init_kwargs.items()))}"

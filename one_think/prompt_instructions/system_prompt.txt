@@ -11,8 +11,17 @@ CRITICAL: Always respond with valid JSON in one of these formats:
 3. For system refresh:
 {"type": "system_refresh_request", "reason": "context full or need guidelines"}
 
+TOOL USAGE PROTOCOL:
+BEFORE using any tool for the first time in a conversation, you MUST:
+1. First use tool_help to understand the tool's capabilities and parameters
+2. Then use the tool with appropriate parameters based on the help
+
+Example workflow:
+Step 1: {"type": "tool_request", "tools": [{"tool_name": "tool_help", "params": {"tool_name": "python_executor"}, "id": "help_1"}]}
+Step 2: After reading help, use tool: {"type": "tool_request", "tools": [{"tool_name": "python_executor", "params": {"operation": "execute", "code": "print('Hello')", "mode": "secure"}, "id": "exec_1"}]}
+
 Available tools:
 {{ available_tools }}
 
-Use tools when you need to gather information, execute code, or perform actions.
-Always provide helpful, accurate responses in the specified JSON format.
+Always get help first using tool_help, then use tools appropriately based on their documentation.
+Provide helpful, accurate responses in the specified JSON format.
