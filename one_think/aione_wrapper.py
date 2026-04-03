@@ -150,7 +150,7 @@ class AiOneWrapper:
             debug_component('wrapper', 'SYSTEM_PROMPT', {
                 'custom_provided': system_prompt is not None,
                 'config_provided': self.config.system_prompt is not None,
-                'prompt_length': len(final_system_prompt)
+                'prompt_length': len(final_system_prompt) if final_system_prompt is not None else 0
             })
             
             # Create provider
@@ -264,7 +264,7 @@ class AiOneWrapper:
             debug_component('wrapper', 'SYSTEM_PROMPT', {
                 'custom_provided': system_prompt is not None,
                 'config_provided': self.config.system_prompt is not None,
-                'prompt_length': len(final_system_prompt)
+                'prompt_length': len(final_system_prompt) if final_system_prompt is not None else 0
             })
             
             # Create provider
