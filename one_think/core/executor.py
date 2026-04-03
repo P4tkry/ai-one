@@ -291,11 +291,13 @@ class Executor:
                     for tc in parse_result.tools
                 ]
 
-                # UI fallback: render multi-tool tool_request as a workflow-like tree
+                # UI fallback: render ANY tool_request as visible tool steps
+                # For multi-tool requests we show a workflow-like tree.
                 started_tree = False
-                if self.progress_callback and len(tool_requests) > 1:
-                    self.progress_callback("Starting workflow", "workflow_start")
-                    started_tree = True
+                if self.progress_callback:
+                    if len(tool_requests) > 1:
+                        self.progress_callback("Starting workflow", "workflow_start")
+                        started_tree = True
                     for tr in tool_requests:
                         step_label = tr.id or tr.tool_name
                         self.progress_callback(f"Using tool: {step_label} ({tr.tool_name})", "tool")
