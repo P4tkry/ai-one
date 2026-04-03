@@ -256,7 +256,7 @@ class Executor:
                 llm_response_text = self._call_llm_provider(
                     session, user_input, system_prompt, accumulated_tool_results
                 )
-                logger.debug(f"LLM response ({len(llm_response_text)} chars): {llm_response_text[:200]}...")
+                logger.debug(f"LLM response ({len(llm_response_text)} chars): {llm_response_text}")
                 debug_llm_response('copilot', llm_response_text, execution_id)
             except Exception as e:
                 error = f"LLM provider error: {str(e)}"
