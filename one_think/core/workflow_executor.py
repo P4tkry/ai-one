@@ -206,10 +206,27 @@ class WorkflowExecutor:
             
             # Execute tool
             try:
-                result = self.tool_registry.execute_tool(
-                    tool_name=tool.tool_name,
-                    params=params
-                )
+                # Create tool instance
+                tool_instance = self.tool_registry.create_tool_instance(tool.tool_name)
+                
+                # Handle help request (should not happen in workflow, but just in case)
+                if params.get('help') is True:
+                    help_text = tool_instance.get_help()
+                    result = ToolResponse(
+                        status="success",
+                        tool=tool.tool_name,
+                        request_id=step_id,
+                        result={"help": help_text},
+                        error=None,
+                        execution_time_ms=0
+                    )
+                else:
+                    # Execute tool with parameters
+                    result = tool_instance.execute_json(
+                        params=params,
+                        request_id=step_id
+                    )
+                
                 results[step_id] = result
                 all_results.append(result)
                 
@@ -229,9 +246,12 @@ class WorkflowExecutor:
                     elif error_handling == "retry":
                         # Simple retry once
                         logger.info(f"Retrying step {step_id}")
-                        result = self.tool_registry.execute_tool(
-                            tool_name=tool.tool_name,
-                            params=params
+                        
+                        # Create new tool instance for retry
+                        tool_instance_retry = self.tool_registry.create_tool_instance(tool.tool_name)
+                        result = tool_instance_retry.execute_json(
+                            params=params,
+                            request_id=f"{step_id}_retry"
                         )
                         results[step_id] = result
                         all_results.append(result)
