@@ -347,19 +347,20 @@ class Executor:
         try:
             # Create current message set with JSON structure
             messages = []
-            
+
             # Add system prompt if provided (only on first request)
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
-            
-            # Add runtime prompt (persistent directive added to EVERY request)
-            runtime_prompt = self._get_runtime_prompt()
-            if runtime_prompt:
-                messages.append({"role": "user", "content": runtime_prompt})
-                debug_component('executor', 'RUNTIME_PROMPT_ADDED', {
-                    'length': len(runtime_prompt)
-                })
-            
+            else:
+                # Add runtime prompt (persistent directive) ONLY on subsequent requests
+                # First request already has full system prompt, so runtime is redundant
+                runtime_prompt = self._get_runtime_prompt()
+                if runtime_prompt:
+                    messages.append({"role": "user", "content": runtime_prompt})
+                    debug_component('executor', 'RUNTIME_PROMPT_ADDED', {
+                        'length': len(runtime_prompt)
+                    })
+
             # Add current user input
             messages.append({"role": "user", "content": user_input})
             
