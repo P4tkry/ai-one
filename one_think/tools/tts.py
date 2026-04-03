@@ -18,6 +18,7 @@ import asyncio
 from pathlib import Path
 
 from one_think.tools.base import Tool, ToolResponse
+from one_think.utils.output_manager import get_output_path
 
 # Try to import Edge TTS, fallback gracefully
 try:
@@ -214,16 +215,16 @@ class EdgeTTSTool(Tool):
 
         voice = params.get("voice", "en-US-AriaNeural")  # Default voice
 
-        # Generate output file path
+        # Generate output file path using OutputManager
         file_path = params.get("file_path")
         if not file_path:
-            timestamp = int(time.time() * 1000)
-            file_path = f"outputs/tts_{timestamp}.wav"
+            # Use universal output manager for consistent naming
+            file_path = get_output_path("tts", "wav", subdirectory="audio")
+        else:
+            file_path = Path(file_path)
 
         # Ensure output directory exists  
-        output_dir = os.path.dirname(file_path)
-        if output_dir:  # Only create if there's a directory part
-            os.makedirs(output_dir, exist_ok=True)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             # Run async synthesis
@@ -232,7 +233,7 @@ class EdgeTTSTool(Tool):
             
             try:
                 communicate = edge_tts.Communicate(text, voice)
-                loop.run_until_complete(communicate.save(file_path))
+                loop.run_until_complete(communicate.save(str(file_path)))
             finally:
                 loop.close()
 
@@ -242,7 +243,7 @@ class EdgeTTSTool(Tool):
                 result={
                     "operation": "synthesize",
                     "success": True,
-                    "output_file": file_path,
+                    "output_file": str(file_path),
                     "voice": voice,
                     "text_length": len(text),
                     "execution_time_ms": execution_time
