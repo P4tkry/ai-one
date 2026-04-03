@@ -43,6 +43,7 @@ class GitStyleStatusDisplay:
     def __init__(self, console: Console):
         self.console = console
         self.current_status = None
+        self.current_message = ""  # Store current message for completion
         self.workflow_active = False
         self.steps_completed = []
         
@@ -58,10 +59,13 @@ class GitStyleStatusDisplay:
             else:
                 prefix = ""
                 
-            # Show completed step
+            # Show completed step using stored message
             completed_text = Text()
-            completed_text.append(prefix + self.current_status.renderable.plain + " ✅", style="green")
+            completed_text.append(prefix + self.current_message + " ✅", style="green")
             self.console.print(completed_text)
+            
+        # Store message for completion
+        self.current_message = message
             
         # Start new step with spinner
         if self.workflow_active and step_type == "tool":
@@ -88,9 +92,10 @@ class GitStyleStatusDisplay:
             # Show final completion
             prefix = "├ " if self.workflow_active else ""
             completed_text = Text()
-            completed_text.append(prefix + self.current_status.renderable.plain + " ✅", style="green")
+            completed_text.append(prefix + self.current_message + " ✅", style="green")
             self.console.print(completed_text)
             self.current_status = None
+            self.current_message = ""
             
     def cleanup(self):
         """Clean up any running status."""
@@ -118,7 +123,6 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
     
     # Beautiful header with rich styling
     console.print("\n🚀 [bold cyan]AI-ONE Modern Interface[/bold cyan]")
-    print("DEBUG: Rich header printed")  # Debug line
     console.print("=" * 50, style="cyan")
     console.print(f"[green]Model:[/green] {wrapper.config.model}")
     console.print(f"[green]Tools:[/green] {'Enabled' if wrapper.config.enable_tools else 'Disabled'}")
