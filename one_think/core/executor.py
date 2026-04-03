@@ -24,8 +24,9 @@ from one_think.core.message import (
 )
 from one_think.core.protocol import (
     Protocol, ProtocolParseResult, ToolRequest as ProtocolToolRequest, 
-    LLMResponse, SystemRefreshRequest, ToolCall, ResponseType
+    LLMResponse, SystemRefreshRequest, ToolCall, ResponseType, WorkflowRequest
 )
+from one_think.core.workflow_executor import WorkflowExecutor
 from one_think.tools.registry import ToolRegistry, tool_registry as global_registry
 from one_think.tools.base import ToolResponse
 from one_think.debug import (
@@ -129,6 +130,9 @@ class Executor:
         self.protocol = protocol or Protocol()
         self.llm_provider = llm_provider
         self.max_tool_iterations = max_tool_iterations
+        
+        # Initialize workflow executor
+        self.workflow_executor = WorkflowExecutor(self.tool_registry)
         
         # Ensure tool registry is initialized
         if self.tool_registry and not self.tool_registry._discovery_performed:
@@ -295,6 +299,31 @@ class Executor:
                 
                 # Add tool results to accumulated results for next iteration
                 accumulated_tool_results.extend(iteration_tool_results)
+            
+            elif parse_result.type == ResponseType.WORKFLOW_REQUEST:
+                # Execute workflow with dependency resolution
+                debug_component('executor', 'WORKFLOW_START', {
+                    'tool_count': len(parse_result.tools),
+                    'execution_mode': parse_result.execution_mode,
+                    'error_handling': parse_result.error_handling
+                })
+                
+                workflow_results, workflow_errors = self.workflow_executor.execute_workflow(
+                    workflow=parse_result,
+                    session_id=session.id,
+                    execution_id=execution_id
+                )
+                
+                tool_results.extend(workflow_results)
+                errors.extend(workflow_errors)
+                
+                # Add workflow results to accumulated results for next iteration
+                accumulated_tool_results.extend(workflow_results)
+                
+                debug_component('executor', 'WORKFLOW_END', {
+                    'results_count': len(workflow_results),
+                    'errors_count': len(workflow_errors)
+                })
                 
             elif parse_result.type == ResponseType.SYSTEM_REFRESH_REQUEST:
                 # Handle system refresh request
