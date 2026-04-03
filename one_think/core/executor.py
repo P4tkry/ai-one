@@ -329,6 +329,10 @@ class Executor:
             elif parse_result.type == ResponseType.SYSTEM_REFRESH_REQUEST:
                 # Handle system refresh request
                 self._handle_system_refresh(parse_result, session)
+
+            elif parse_result.type == ResponseType.SYSTEM_INSTRUCTION_REMIND:
+                # Handle system instruction reminder request as refresh
+                self._handle_system_refresh(parse_result, session)
                 
             elif parse_result.type == ResponseType.RESPONSE:
                 # Text response - we're done
