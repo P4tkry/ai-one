@@ -104,7 +104,8 @@ Use workflows when:
 
 Workflow features:
 - "depends_on" for dependencies
-- "{step_id.output}" references
+- "{step_id.result}" and nested references like "{step_id.result.stdout}"
+- DO NOT use "{step_id.output}" because tool responses expose data under "result"
 
 ========================================
 ERROR HANDLING

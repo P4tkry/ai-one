@@ -41,13 +41,18 @@ ALLOWED RESPONSE TYPES
     {
       "tool_name": "tool_name_2",
       "params": {
-        "input": "{step_1.output}"
+        "input": "{step_1.result.stdout}"
       },
       "id": "step_2",
       "depends_on": ["step_1"]
     }
   ]
 }
+
+Workflow reference notes:
+- Use "{step_id.result}" for full tool result object
+- Use nested fields like "{step_id.result.stdout}" for specific values
+- Do NOT use "{step_id.output}" (invalid in current ToolResponse schema)
 
 4. System refresh:
 {
