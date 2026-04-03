@@ -107,7 +107,7 @@ class ColoredDebugLogger:
         
         self.debug_component('request', 'START', {
             'request_id': request_id,
-            'user_input': user_input[:100] + '...' if len(user_input) > 100 else user_input,
+            'user_input': user_input,
             'session_id': session_id,
             'timestamp': datetime.now().isoformat()
         })
@@ -131,24 +131,24 @@ class ColoredDebugLogger:
         
         # Handle both dict and object messages
         formatted_messages = []
-        for msg in messages[:3]:  # First 3 messages for context
+        for msg in messages:  # All messages - no truncation
             if hasattr(msg, '__dict__'):
                 # Object with attributes
                 formatted_messages.append({
                     'type': getattr(msg, 'type', 'unknown'),
-                    'content': str(getattr(msg, 'content', ''))[:200] + '...' if len(str(getattr(msg, 'content', ''))) > 200 else str(getattr(msg, 'content', ''))
+                    'content': str(getattr(msg, 'content', ''))
                 })
             elif isinstance(msg, dict):
                 # Dictionary
                 formatted_messages.append({
                     'author': msg.get('author', msg.get('role', 'unknown')),
-                    'content': msg.get('message', msg.get('content', ''))[:200] + '...' if len(msg.get('message', msg.get('content', ''))) > 200 else msg.get('message', msg.get('content', ''))
+                    'content': msg.get('message', msg.get('content', ''))
                 })
             else:
                 # String or other
                 formatted_messages.append({
                     'type': 'raw',
-                    'content': str(msg)[:200] + '...' if len(str(msg)) > 200 else str(msg)
+                    'content': str(msg)
                 })
         
         self.debug_component('llm', 'CALL', {
@@ -167,7 +167,7 @@ class ColoredDebugLogger:
             'provider': provider,
             'request_id': request_id,
             'response_length': len(response),
-            'response_preview': response[:300] + '...' if len(response) > 300 else response
+            'response_preview': response
         })
     
     def debug_tool_execution(self, tool_name: str, params: Dict[str, Any], request_id: str):
@@ -213,7 +213,7 @@ class ColoredDebugLogger:
             'request_id': request_id,
             'raw_length': len(raw_response),
             'parsed_type': parsed_type,
-            'raw_preview': raw_response[:200] + '...' if len(raw_response) > 200 else raw_response
+            'raw_preview': raw_response
         })
 
 
