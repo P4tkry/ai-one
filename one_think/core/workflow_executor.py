@@ -11,7 +11,7 @@ This module handles execution of workflows with:
 import logging
 import json
 import re
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple, Any, Callable
 from collections import defaultdict, deque
 
 from one_think.core.protocol import WorkflowRequest, WorkflowToolCall
@@ -50,7 +50,8 @@ class WorkflowExecutor:
         self,
         workflow: WorkflowRequest,
         session_id: str,
-        execution_id: str
+        execution_id: str,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[List[ToolResponse], List[str]]:
         """
         Execute a workflow with dependency resolution.
@@ -66,6 +67,8 @@ class WorkflowExecutor:
         logger.info(f"Executing workflow: mode={workflow.execution_mode}, "
                    f"error_handling={workflow.error_handling}, "
                    f"tools={len(workflow.tools)}")
+        if progress_callback:
+            progress_callback("Starting workflow", "workflow_start")
         
         # Resolve dependencies and get execution order
         try:
@@ -77,24 +80,34 @@ class WorkflowExecutor:
         
         # Execute based on mode
         if workflow.execution_mode == "sequential":
-            return self._execute_sequential(
+            results, errors = self._execute_sequential(
                 workflow.tools,
                 execution_order,
                 workflow.error_handling,
                 session_id,
-                execution_id
+                execution_id,
+                progress_callback
             )
+            if progress_callback:
+                progress_callback("Workflow completed", "workflow_end")
+            return results, errors
         elif workflow.execution_mode == "parallel":
-            return self._execute_parallel(
+            results, errors = self._execute_parallel(
                 workflow.tools,
                 execution_order,
                 workflow.error_handling,
                 session_id,
-                execution_id
+                execution_id,
+                progress_callback
             )
+            if progress_callback:
+                progress_callback("Workflow completed", "workflow_end")
+            return results, errors
         else:
             error = f"Unknown execution_mode: {workflow.execution_mode}"
             logger.error(error)
+            if progress_callback:
+                progress_callback("Workflow failed", "workflow_end")
             return [], [error]
     
     def _resolve_dependencies(self, tools: List[WorkflowToolCall]) -> List[str]:
@@ -160,7 +173,8 @@ class WorkflowExecutor:
         execution_order: List[str],
         error_handling: str,
         session_id: str,
-        execution_id: str
+        execution_id: str,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[List[ToolResponse], List[str]]:
         """
         Execute workflow sequentially in dependency order.
@@ -186,6 +200,8 @@ class WorkflowExecutor:
         # Execute in order
         for step_id in execution_order:
             tool = tools_dict[step_id]
+            if progress_callback:
+                progress_callback(f"Using tool: {step_id} ({tool.tool_name})", "tool")
             
             logger.info(f"Executing workflow step: {step_id} ({tool.tool_name})")
             
@@ -281,7 +297,8 @@ class WorkflowExecutor:
         execution_order: List[str],
         error_handling: str,
         session_id: str,
-        execution_id: str
+        execution_id: str,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[List[ToolResponse], List[str]]:
         """
         Execute workflow with parallel execution of independent steps.
@@ -303,7 +320,7 @@ class WorkflowExecutor:
         # For now, fall back to sequential
         logger.warning("Parallel execution not yet implemented, using sequential")
         return self._execute_sequential(
-            tools, execution_order, error_handling, session_id, execution_id
+            tools, execution_order, error_handling, session_id, execution_id, progress_callback
         )
     
     def _substitute_parameters(

@@ -116,7 +116,8 @@ class Executor:
         tool_registry: Optional[ToolRegistry] = None,
         protocol: Optional[Protocol] = None,
         llm_provider: Optional[Union[Callable, 'LLMProvider']] = None,
-        max_tool_iterations: int = 5
+        max_tool_iterations: int = 5,
+        progress_callback: Optional[Callable[[str, str], None]] = None
     ):
         """
         Initialize executor.
@@ -131,6 +132,7 @@ class Executor:
         self.protocol = protocol or Protocol()
         self.llm_provider = llm_provider
         self.max_tool_iterations = max_tool_iterations
+        self.progress_callback = progress_callback
         
         # Initialize workflow executor
         self.workflow_executor = WorkflowExecutor(self.tool_registry)
@@ -312,7 +314,8 @@ class Executor:
                 workflow_results, workflow_errors = self.workflow_executor.execute_workflow(
                     workflow=parse_result,
                     session_id=session.id,
-                    execution_id=execution_id
+                    execution_id=execution_id,
+                    progress_callback=self.progress_callback
                 )
                 
                 tool_results.extend(workflow_results)

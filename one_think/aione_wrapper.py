@@ -164,7 +164,8 @@ class AiOneWrapper:
             executor = Executor(
                 tool_registry=self.tool_registry,
                 llm_provider=provider,
-                max_tool_iterations=self.config.max_tool_iterations
+                max_tool_iterations=self.config.max_tool_iterations,
+                progress_callback=progress_callback
             )
             debug_component('wrapper', 'EXECUTOR_CREATED', {
                 'max_iterations': self.config.max_tool_iterations,

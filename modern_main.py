@@ -44,7 +44,9 @@ class GitStyleStatusDisplay:
         self.console = console
         self.current_status = None
         self.current_message = ""  # Store current message for completion
+        self.current_step_type = "default"
         self.workflow_active = False
+        self.workflow_ending = False
         self.steps_completed = []
         
     def add_step(self, message: str, step_type: str = "default"):
@@ -54,7 +56,12 @@ class GitStyleStatusDisplay:
             self.current_status.stop()
             
             # Show completion with appropriate prefix
-            if self.workflow_active and step_type == "tool":
+            if self.workflow_active and self.current_step_type == "tool":
+                if self.workflow_ending:
+                    prefix = "└ "
+                else:
+                    prefix = "├ "
+            elif self.workflow_active and self.current_step_type == "workflow":
                 prefix = "├ "
             else:
                 prefix = ""
@@ -66,9 +73,15 @@ class GitStyleStatusDisplay:
             
         # Store message for completion
         self.current_message = message
+        self.current_step_type = step_type
             
         # Start new step with spinner
         if self.workflow_active and step_type == "tool":
+            if self.workflow_ending:
+                display_message = f"└ {message}"
+            else:
+                display_message = f"├ {message}"
+        elif self.workflow_active and step_type == "workflow":
             display_message = f"├ {message}"
         else:
             display_message = message
@@ -79,10 +92,11 @@ class GitStyleStatusDisplay:
     def start_workflow(self):
         """Start workflow mode with git-style pipes."""
         self.workflow_active = True
+        self.workflow_ending = False
         
     def end_workflow(self):
         """End workflow mode."""
-        self.workflow_active = False
+        self.workflow_ending = True
         
     def complete_final(self):
         """Complete the final step."""
@@ -90,12 +104,21 @@ class GitStyleStatusDisplay:
             self.current_status.stop()
             
             # Show final completion
-            prefix = "├ " if self.workflow_active else ""
+            if self.workflow_active and self.current_step_type == "tool":
+                prefix = "└ " if self.workflow_ending else "├ "
+            elif self.workflow_active and self.current_step_type == "workflow":
+                prefix = "├ "
+            else:
+                prefix = ""
             completed_text = Text()
             completed_text.append(prefix + self.current_message + " ✅", style="green")
             self.console.print(completed_text)
             self.current_status = None
             self.current_message = ""
+            self.current_step_type = "default"
+            if self.workflow_ending:
+                self.workflow_active = False
+                self.workflow_ending = False
             
     def cleanup(self):
         """Clean up any running status."""
@@ -217,6 +240,7 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
                             git_display.add_step(f"🔧 {message}", "tool")
                     elif msg_type == "workflow_end":
                         git_display.end_workflow()
+                        git_display.complete_final()
                     elif msg_type == "thinking_complete":
                         git_display.complete_final()
                 
