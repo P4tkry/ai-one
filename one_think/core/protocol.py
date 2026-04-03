@@ -23,7 +23,9 @@ class ResponseType(str, Enum):
     """Type of response from LLM."""
     RESPONSE = "response"
     TOOL_REQUEST = "tool_request"
+    WORKFLOW_REQUEST = "workflow_request"  # NEW
     SYSTEM_REFRESH_REQUEST = "system_refresh_request"
+    SYSTEM_INSTRUCTION_REMIND = "system_instruction_remind"
 
 
 class ToolCall(BaseModel):
@@ -45,6 +47,38 @@ class ToolCall(BaseModel):
         """Ensure tool_name is not empty."""
         if not v.strip():
             raise ValueError("tool_name cannot be empty")
+        return v.strip()
+
+
+class WorkflowToolCall(BaseModel):
+    """
+    Tool call specification for workflows with dependencies.
+    
+    Fields:
+        tool_name: Name of tool to execute
+        params: Parameters for tool execution (can contain {step_id.field} references)
+        id: Unique identifier for this workflow step (required)
+        depends_on: List of step IDs this step depends on
+    """
+    tool_name: str = Field(..., min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+    id: str = Field(..., min_length=1)  # Required for workflows
+    depends_on: list[str] = Field(default_factory=list)
+    
+    @field_validator('tool_name')
+    @classmethod
+    def validate_tool_name(cls, v: str) -> str:
+        """Ensure tool_name is not empty."""
+        if not v.strip():
+            raise ValueError("tool_name cannot be empty")
+        return v.strip()
+        
+    @field_validator('id')
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Ensure id is not empty."""
+        if not v.strip():
+            raise ValueError("id cannot be empty for workflow tools")
         return v.strip()
 
 
@@ -110,8 +144,88 @@ class SystemRefreshRequest(BaseModel):
     model_config = ConfigDict(frozen=False)
 
 
+class SystemInstructionRemindRequest(BaseModel):
+    """
+    Request for system instruction reminder.
+    
+    Format:
+    {
+        "type": "system_instruction_remind",
+        "reason": "need reminder of system instructions"
+    }
+    """
+    type: ResponseType = Field(default=ResponseType.SYSTEM_INSTRUCTION_REMIND)
+    reason: Optional[str] = None
+    
+    model_config = ConfigDict(frozen=False)
+
+
+class WorkflowRequest(BaseModel):
+    """
+    Request to execute a workflow of multiple tools with dependencies.
+    
+    Format:
+    {
+        "type": "workflow_request", 
+        "execution_mode": "sequential",
+        "error_handling": "abort",
+        "tools": [
+            {
+                "tool_name": "web_fetch",
+                "params": {"url": "..."},
+                "id": "fetch_data"
+            },
+            {
+                "tool_name": "python_executor",
+                "params": {"code": "process({fetch_data.content})"},
+                "id": "process_data",
+                "depends_on": ["fetch_data"]
+            }
+        ]
+    }
+    """
+    type: ResponseType = Field(default=ResponseType.WORKFLOW_REQUEST)
+    execution_mode: str = Field(default="sequential")  # "sequential" | "parallel"
+    error_handling: str = Field(default="abort")  # "abort" | "skip" | "retry"
+    tools: list[WorkflowToolCall] = Field(..., min_length=1)
+    
+    model_config = ConfigDict(frozen=False)
+    
+    @field_validator('tools')
+    @classmethod
+    def validate_workflow_tools(cls, v: list[WorkflowToolCall]) -> list[WorkflowToolCall]:
+        """Ensure workflow has at least one tool and valid dependencies."""
+        if not v:
+            raise ValueError("workflow tools list cannot be empty")
+            
+        # Validate dependencies reference existing tool IDs
+        tool_ids = {tool.id for tool in v}
+        for tool in v:
+            for dep_id in tool.depends_on:
+                if dep_id not in tool_ids:
+                    raise ValueError(f"Tool {tool.id} depends on non-existent tool {dep_id}")
+        
+        return v
+    
+    @field_validator('execution_mode')
+    @classmethod
+    def validate_execution_mode(cls, v: str) -> str:
+        """Validate execution mode."""
+        if v not in ("sequential", "parallel"):
+            raise ValueError("execution_mode must be 'sequential' or 'parallel'")
+        return v
+        
+    @field_validator('error_handling')
+    @classmethod
+    def validate_error_handling(cls, v: str) -> str:
+        """Validate error handling policy."""
+        if v not in ("abort", "skip", "retry"):
+            raise ValueError("error_handling must be 'abort', 'skip', or 'retry'")
+        return v
+
+
 # Union type for protocol responses
-ProtocolResponse = Response | ToolRequest | SystemRefreshRequest
+ProtocolResponse = Response | ToolRequest | WorkflowRequest | SystemRefreshRequest | SystemInstructionRemindRequest
 
 
 class ProtocolParser:
@@ -140,12 +254,15 @@ class ProtocolParser:
         try:
             data = json.loads(raw_response)
         except json.JSONDecodeError as e:
-            # Fallback: treat as plain text response
-            logger.warning(f"LLM returned plain text instead of JSON: {e}")
-            logger.debug(f"Raw response: {raw_response[:200]}...")
+            logger.warning(f"LLM returned malformed JSON: {e}")
+            logger.debug(f"Raw response: {raw_response[:500]}...")
             
-            # Wrap plain text in Response format
-            return Response(content=raw_response.strip())
+            # Return special error response for AI to recognize and fix
+            error_details = f"JSON Parse Error: {str(e)}"
+            if len(raw_response) > 1000:
+                error_details += " (Response may be truncated)"
+            
+            return Response(content=f"<<JSON_MALFORMED_ERROR>> {error_details}")
         
         # Validate is dict
         if not isinstance(data, dict):
@@ -170,13 +287,19 @@ class ProtocolParser:
             elif response_type == "tool_request":
                 return ToolRequest(**data)
             
+            elif response_type == "workflow_request":
+                return WorkflowRequest(**data)
+            
             elif response_type == "system_refresh_request":
                 return SystemRefreshRequest(**data)
+            
+            elif response_type == "system_instruction_remind":
+                return SystemInstructionRemindRequest(**data)
             
             else:
                 raise ValueError(
                     f'Unknown response type: "{response_type}". '
-                    f'Expected one of: response, tool_request, system_refresh_request'
+                    f'Expected one of: response, tool_request, workflow_request, system_refresh_request, system_instruction_remind'
                 )
         
         except Exception as e:
@@ -191,13 +314,18 @@ class ProtocolParser:
         return isinstance(response, ToolRequest)
     
     @staticmethod
+    def is_workflow_request(response: ProtocolResponse) -> bool:
+        """Check if response is a workflow request."""
+        return isinstance(response, WorkflowRequest)
+    
+    @staticmethod
     def is_system_refresh_request(response: ProtocolResponse) -> bool:
         """Check if response is a system refresh request."""
         return isinstance(response, SystemRefreshRequest)
     
     @staticmethod
     def is_final_response(response: ProtocolResponse) -> bool:
-        """Check if response is a final answer (not tool/refresh request)."""
+        """Check if response is a final answer (not tool/workflow/refresh request)."""
         return isinstance(response, Response)
 
 

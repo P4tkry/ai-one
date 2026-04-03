@@ -11,9 +11,18 @@ import sys
 from typing import Dict, Any
 from datetime import datetime
 
+# Try to import rich for beautiful logging
+try:
+    from rich.logging import RichHandler
+    from rich.console import Console
+    from rich.highlighter import ReprHighlighter
+    HAS_RICH = True
+except ImportError:
+    HAS_RICH = False
 
-class DebugLogger:
-    """Enhanced debug logger for AI-ONE with detailed component tracking."""
+
+class ColoredDebugLogger:
+    """Enhanced debug logger for AI-ONE with beautiful colored output."""
     
     def __init__(self):
         self.debug_enabled = os.getenv('DEBUG', '0') == '1'
@@ -23,25 +32,44 @@ class DebugLogger:
             self._setup_debug_logging()
     
     def _setup_debug_logging(self):
-        """Configure detailed debug logging."""
+        """Configure detailed debug logging with colors."""
         # Set logging level to DEBUG for all AI-ONE components
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.DEBUG)
         
-        # Create detailed formatter
-        formatter = logging.Formatter(
-            '%(asctime)s.%(msecs)03d | %(levelname)8s | %(name)20s | %(funcName)15s:%(lineno)03d | %(message)s',
-            datefmt='%H:%M:%S'
-        )
-        
-        # Console handler with colors if available
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(formatter)
-        
-        # Add handler to root logger
-        if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
-            root_logger.addHandler(console_handler)
+        if HAS_RICH:
+            # Rich console handler with beautiful formatting
+            console = Console(stderr=True, force_terminal=True)
+            rich_handler = RichHandler(
+                console=console,
+                show_time=True,
+                show_level=True,
+                show_path=True,
+                highlighter=ReprHighlighter(),
+                rich_tracebacks=True,
+                tracebacks_show_locals=True
+            )
+            rich_handler.setLevel(logging.DEBUG)
+            
+            # Add handler to root logger
+            if not any(isinstance(h, RichHandler) for h in root_logger.handlers):
+                root_logger.addHandler(rich_handler)
+                
+        else:
+            # Fallback to standard colored formatter
+            formatter = logging.Formatter(
+                '%(asctime)s.%(msecs)03d | %(levelname)8s | %(name)20s | %(funcName)15s:%(lineno)03d | %(message)s',
+                datefmt='%H:%M:%S'
+            )
+            
+            # Console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.DEBUG)
+            console_handler.setFormatter(formatter)
+            
+            # Add handler to root logger
+            if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+                root_logger.addHandler(console_handler)
         
         # Set DEBUG level for all AI-ONE components
         for component in [
@@ -54,7 +82,8 @@ class DebugLogger:
             'one_think.tools',
             'one_think.tools.registry',
             'one_think.providers',
-            'one_think.aione_wrapper'
+            'one_think.aione_wrapper',
+            'ai_one_debug'
         ]:
             logging.getLogger(component).setLevel(logging.DEBUG)
     
@@ -189,7 +218,7 @@ class DebugLogger:
 
 
 # Global debug logger instance
-debug_logger = DebugLogger()
+debug_logger = ColoredDebugLogger()
 
 
 def debug_component(component: str, action: str, data: Dict[str, Any] = None):

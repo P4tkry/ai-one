@@ -98,6 +98,122 @@ class AiOneWrapper:
             model=self.config.model
         )
     
+    def ask_question_with_git_style(
+        self,
+        question: str, 
+        session_id: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
+        system_prompt: Optional[str] = None
+    ) -> tuple[str, str]:
+        """
+        Ask a question using the modern AI-ONE architecture with git-style status callbacks.
+        
+        Args:
+            question: User question/prompt
+            session_id: Session ID (auto-generated if None)
+            progress_callback: Function to call with status updates (message, type)
+            system_prompt: Custom system prompt (uses default if None)
+            
+        Returns:
+            Tuple of (session_id, response_text)
+        """
+        # Generate session ID if needed
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            if progress_callback:
+                progress_callback("Creating new session", "session")
+
+        # Generate request ID for tracking
+        request_id = f"aione_{session_id[:8]}_{uuid.uuid4().hex[:8]}"
+        
+        # Debug request start
+        debug_request_start(request_id, question, session_id)
+        
+        try:
+            
+            # Get or create session
+            session = self._get_or_create_session(session_id)
+            debug_session_update(session_id, 'RETRIEVED', {
+                'requests_count': session.stats['requests_count'],
+                'created_at': session.created_at.isoformat()
+            })
+            
+            # Determine system prompt
+            final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
+            if progress_callback and not session.system_prompt_sent:
+                progress_callback("Loading system prompt", "system_prompt")
+                
+            debug_component('wrapper', 'SYSTEM_PROMPT', {
+                'custom_provided': system_prompt is not None,
+                'config_provided': self.config.system_prompt is not None,
+                'prompt_length': len(final_system_prompt)
+            })
+            
+            # Create provider
+            provider = self._create_provider()
+            debug_component('wrapper', 'PROVIDER_CREATED', {
+                'provider_type': type(provider).__name__,
+                'model': getattr(provider, 'model', 'unknown')
+            })
+            
+            # Initialize executor with provider for this request
+            executor = Executor(
+                tool_registry=self.tool_registry,
+                llm_provider=provider,
+                max_tool_iterations=self.config.max_tool_iterations
+            )
+            debug_component('wrapper', 'EXECUTOR_CREATED', {
+                'max_iterations': self.config.max_tool_iterations,
+                'tools_enabled': self.tool_registry is not None
+            })
+            
+            # Add progress callback for thinking phase
+            if progress_callback:
+                progress_callback("AI thinking", "thinking")
+            
+            # Execute request
+            result: ExecutionResult = executor.execute_request(
+                user_input=question,
+                session=session,
+                system_prompt=final_system_prompt,
+                request_id=request_id
+            )
+            
+            # Signal thinking completion
+            if progress_callback:
+                progress_callback("Thinking complete", "thinking_complete")
+            
+            # Log results
+            logger.info(
+                f"AI-ONE request completed: {result.status.value} "
+                f"(tools: {len(result.tool_results) if result.tool_results else 0})"
+            )
+            
+            if result.tool_results:
+                logger.debug(f"Executed {len(result.tool_results)} tools")
+                debug_component('wrapper', 'TOOLS_EXECUTED', {
+                    'tool_count': len(result.tool_results),
+                    'tool_names': [tr.tool for tr in result.tool_results] if result.tool_results else []
+                })
+            
+            # Debug request completion
+            debug_request_end(request_id, result.status.value, result.execution_time_ms)
+            
+            # Return response in original format
+            return session_id, result.response
+            
+        except Exception as e:
+            if progress_callback:
+                progress_callback("Request failed", "thinking_complete")
+            logger.error(f"AI-ONE request failed: {e}", exc_info=True)
+            debug_component('wrapper', 'REQUEST_FAILED', {
+                'request_id': request_id,
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            })
+            error_response = f"I encountered an error: {str(e)}"
+            return session_id, error_response
+
     def ask_question(
         self,
         question: str, 

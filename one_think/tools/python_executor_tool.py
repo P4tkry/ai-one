@@ -108,6 +108,7 @@ class PythonExecutorTool(Tool):
             return self._execute_file(params, timeout, mode, raw_output, request_id)
         else:
             return self._create_error_response(
+                "ValidationError",
                 f"Unknown operation: '{operation}'. Valid operations: execute, execute_file",
                 request_id=request_id
             )
@@ -321,6 +322,7 @@ if hasattr(socket, "fromfd"):
         
         if not isinstance(code, str) or not code.strip():
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'code'",
                 request_id=request_id
             )
@@ -328,7 +330,7 @@ if hasattr(socket, "fromfd"):
         working_dir = params.get("working_dir", ".")
         wd_path, wd_error = self._validate_working_dir(working_dir)
         if wd_error:
-            return self._create_error_response(wd_error, request_id=request_id)
+            return self._create_error_response("ValidationError", wd_error, request_id=request_id)
         
         try:
             with tempfile.TemporaryDirectory(prefix="pyexec_") as tmp_dir:
@@ -356,6 +358,7 @@ if hasattr(socket, "fromfd"):
                 # Check for errors
                 if "error" in exec_result:
                     return self._create_error_response(
+                        "ExecutionError",
                         exec_result["error"],
                         request_id=request_id
                     )
@@ -398,6 +401,7 @@ if hasattr(socket, "fromfd"):
         
         if not isinstance(file_path, str) or not file_path.strip():
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'file_path'",
                 request_id=request_id
             )
@@ -406,18 +410,21 @@ if hasattr(socket, "fromfd"):
         
         if not script_path.exists():
             return self._create_error_response(
+                "FileNotFoundError",
                 f"File not found: {file_path}",
                 request_id=request_id
             )
-        
+
         if not script_path.is_file():
             return self._create_error_response(
+                "ValidationError",
                 f"Path is not a file: {file_path}",
                 request_id=request_id
             )
         
         if script_path.suffix.lower() != ".py":
             return self._create_error_response(
+                "ValidationError",
                 "File must be a Python script (.py)",
                 request_id=request_id
             )
@@ -425,6 +432,7 @@ if hasattr(socket, "fromfd"):
         if not self._is_path_allowed(script_path):
             allowed = ", ".join(str(p) for p in self.allowed_roots)
             return self._create_error_response(
+                "SecurityError",
                 f"Access denied: file is outside allowed directories. Allowed roots: {allowed}",
                 request_id=request_id
             )
@@ -432,7 +440,7 @@ if hasattr(socket, "fromfd"):
         working_dir = params.get("working_dir")
         wd_path, wd_error = self._validate_working_dir(working_dir)
         if wd_error:
-            return self._create_error_response(wd_error, request_id=request_id)
+            return self._create_error_response("ValidationError", wd_error, request_id=request_id)
         
         if wd_path is None:
             wd_path = script_path.parent
@@ -462,6 +470,7 @@ if hasattr(socket, "fromfd"):
                 # Check for errors
                 if "error" in exec_result:
                     return self._create_error_response(
+                        "ExecutionError",
                         exec_result["error"],
                         request_id=request_id
                     )

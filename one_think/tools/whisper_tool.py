@@ -7,6 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Literal
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -33,11 +34,12 @@ class WhisperTool(Tool):
     # Pydantic schemas
     class Input(BaseModel):
         """Input parameters for audio transcription."""
-        operation: Literal["transcribe", "translate"] = Field(default="transcribe", description="Operation: transcribe or translate to English")
-        audio_file: Optional[str] = Field(default=None, description="Path to audio file")
-        audio_url: Optional[str] = Field(default=None, description="URL to audio file")
-        model_size: Optional[Literal["tiny", "base", "small", "medium", "large"]] = Field(default="base", description="Whisper model size")
+        operation: Literal["transcribe", "list_models"] = Field(default="transcribe", description="Operation: transcribe or list_models")
+        audio_path: Optional[str] = Field(default=None, description="Path to audio file or URL")
+        model: Optional[Literal["base", "small", "medium", "large"]] = Field(default="base", description="Whisper model size")
         language: Optional[str] = Field(default=None, description="Audio language (auto-detect if None)")
+        format: Optional[Literal["json", "text", "srt", "vtt"]] = Field(default="json", description="Output format")
+        temperature: Optional[str] = Field(default="0", description="Sampling temperature (0-1)")
         
     class Output(BaseModel):
         """Output format for transcription."""
@@ -72,6 +74,7 @@ class WhisperTool(Tool):
         # Check if Whisper is available
         if not WHISPER_AVAILABLE:
             return self._create_error_response(
+                "DependencyError",
                 "OpenAI Whisper not installed. Install with: pip install openai-whisper requests",
                 request_id=request_id
             )
@@ -80,6 +83,7 @@ class WhisperTool(Tool):
         operation = params.get("operation")
         if not operation:
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'operation'",
                 request_id=request_id
             )
@@ -91,6 +95,7 @@ class WhisperTool(Tool):
             return self._list_models(request_id)
         else:
             return self._create_error_response(
+                "ValidationError",
                 f"Unknown operation: '{operation}'. Valid operations: transcribe, list_models",
                 request_id=request_id
             )
@@ -100,6 +105,7 @@ class WhisperTool(Tool):
         audio_path = params.get("audio_path")
         if not audio_path:
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'audio_path'",
                 request_id=request_id
             )
@@ -113,6 +119,7 @@ class WhisperTool(Tool):
         # Validate model
         if model not in self.models:
             return self._create_error_response(
+                "ValidationError",
                 f"Invalid model: {model}. Available: {', '.join(self.models)}",
                 request_id=request_id
             )
@@ -120,6 +127,7 @@ class WhisperTool(Tool):
         # Validate format
         if format_type not in self.output_formats:
             return self._create_error_response(
+                "ValidationError",
                 f"Invalid format: {format_type}. Available: {', '.join(self.output_formats)}",
                 request_id=request_id
             )
@@ -146,6 +154,7 @@ class WhisperTool(Tool):
             import whisper
         except ImportError:
             return self._create_error_response(
+                "DependencyError",
                 "Whisper library not available. Please install: pip install openai-whisper",
                 request_id=request_id
             )
@@ -153,6 +162,7 @@ class WhisperTool(Tool):
         # Check if file exists
         if not os.path.exists(file_path):
             return self._create_error_response(
+                "FileNotFoundError",
                 f"Audio file not found: {file_path}",
                 request_id=request_id
             )
@@ -160,6 +170,7 @@ class WhisperTool(Tool):
         # Check file extension
         if not file_path.lower().endswith(self.audio_extensions):
             return self._create_error_response(
+                "ValidationError",
                 f"Unsupported audio format. Supported: {', '.join(self.audio_extensions)}",
                 request_id=request_id
             )
@@ -185,6 +196,7 @@ class WhisperTool(Tool):
             
         except Exception as e:
             return self._create_error_response(
+                "TranscriptionError", 
                 f"Error transcribing file: {type(e).__name__}: {e}",
                 request_id=request_id
             )
@@ -205,6 +217,7 @@ class WhisperTool(Tool):
             import whisper
         except ImportError:
             return self._create_error_response(
+                "DependencyError",
                 "Whisper library not available. Please install: pip install openai-whisper",
                 request_id=request_id
             )
@@ -214,24 +227,83 @@ class WhisperTool(Tool):
             response = requests.get(url, timeout=60)
             response.raise_for_status()
             
-            # Save to temporary file
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
+            # Determine file extension from URL or Content-Type
+            extension = ".mp3"  # default
+            
+            # Parse URL path (without query parameters)
+            from urllib.parse import urlparse
+            parsed_url = urlparse(url)
+            url_path = parsed_url.path.lower()
+            
+            if url_path.endswith(('.mp4', '.wav', '.ogg', '.webm', '.m4a', '.flac', '.mp3')):
+                extension = os.path.splitext(url_path)[1]
+            else:
+                # Try to determine from Content-Type header
+                content_type = response.headers.get('content-type', '').lower()
+                if 'mp4' in content_type:
+                    extension = ".mp4"
+                elif 'wav' in content_type:
+                    extension = ".wav"
+                elif 'ogg' in content_type:
+                    extension = ".ogg"
+                elif 'webm' in content_type:
+                    extension = ".webm"
+            
+            # Save to temporary file with correct extension
+            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_file:
                 tmp_file.write(response.content)
                 temp_path = tmp_file.name
             
+            # Transcribe temporary file and clean up on completion
             try:
-                # Transcribe temporary file
-                return self._transcribe_file(temp_path, language, model, format_type, temperature, request_id)
+                # Verify temp file exists and is readable
+                if not os.path.exists(temp_path):
+                    return self._create_error_response(
+                        "FileSystemError",
+                        f"Temporary file not found after creation: {temp_path}",
+                        request_id=request_id
+                    )
                 
-            finally:
-                # Clean up temporary file
+                file_size = os.path.getsize(temp_path)
+                if file_size == 0:
+                    return self._create_error_response(
+                        "FileSystemError",
+                        f"Temporary file is empty: {temp_path} ({file_size} bytes)",
+                        request_id=request_id
+                    )
+                
+                # Proceed with transcription
+                result = self._transcribe_file(temp_path, language, model, format_type, temperature, request_id)
+                
+                # Clean up temporary file after transcription is complete
                 try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except Exception:
+                    pass  # Ignore cleanup errors
                     
+                return result
+                
+            except Exception as cleanup_error:
+                # Ensure cleanup on error  
+                try:
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except Exception:
+                    pass
+                # Re-raise original error
+                raise
+                
         except Exception as e:
+            # Ensure cleanup on error
+            try:
+                if 'temp_path' in locals() and os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except Exception:
+                pass
+                
             return self._create_error_response(
+                "DownloadError",
                 f"Error downloading audio: {e}",
                 request_id=request_id
             )
@@ -286,6 +358,7 @@ class WhisperTool(Tool):
                 
             else:
                 return self._create_error_response(
+                    "ValidationError",
                     f"Unknown format: {format_type}",
                     request_id=request_id
                 )
@@ -297,6 +370,7 @@ class WhisperTool(Tool):
                 
         except Exception as e:
             return self._create_error_response(
+                "FormattingError",
                 f"Error formatting result: {e}",
                 request_id=request_id
             )

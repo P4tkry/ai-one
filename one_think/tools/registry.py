@@ -110,7 +110,11 @@ class ToolRegistry:
                             obj.__module__ == full_module_name and
                             not getattr(obj, '__abstract__', False)):
                             
-                            tool_name = self._extract_tool_name(name, module_name)
+                            # Check if class has explicit name attribute
+                            if hasattr(obj, 'name') and obj.name:
+                                tool_name = obj.name
+                            else:
+                                tool_name = self._extract_tool_name(name, module_name)
                             
                             # Register the tool
                             self._tools[tool_name] = obj

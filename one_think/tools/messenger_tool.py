@@ -28,10 +28,13 @@ class MessengerTool(Tool):
     # Pydantic schemas
     class Input(BaseModel):
         """Input parameters for messenger operations."""
-        operation: Literal["send", "receive", "get_profile"] = Field(description="Messenger operation")
+        operation: Literal["send", "receive", "get_profile", "send_message", "list_conversations", "get_conversation", "get_user_profile", "health", "get_attachments"] = Field(description="Messenger operation")
         recipient_id: Optional[str] = Field(default=None, description="Recipient ID (for send)")
         message: Optional[str] = Field(default=None, description="Message to send")
         user_id: Optional[str] = Field(default=None, description="User ID (for get_profile)")
+        conversation_id: Optional[str] = Field(default=None, description="Conversation ID")
+        message_id: Optional[str] = Field(default=None, description="Message ID (for attachments)")
+        limit: Optional[int] = Field(default=None, description="Limit for results")
         
     class Output(BaseModel):
         """Output format for messenger operations."""
@@ -40,6 +43,10 @@ class MessengerTool(Tool):
         message_id: Optional[str] = Field(description="Message ID (for send)")
         messages: Optional[List[Dict[str, Any]]] = Field(description="Messages (for receive)")
         profile: Optional[Dict[str, Any]] = Field(description="User profile (for get_profile)")
+        attachments: Optional[List[Dict[str, Any]]] = Field(description="Attachments (for get_attachments)")
+        audio_files: Optional[List[Dict[str, Any]]] = Field(description="Audio files found")
+        download_info: Optional[Dict[str, Any]] = Field(description="Download information")
+        file_data: Optional[str] = Field(description="Base64 encoded file data")
         error: Optional[str] = Field(description="Error message if failed")
     
     DEFAULT_LIST_LIMIT = 10
@@ -66,12 +73,14 @@ class MessengerTool(Tool):
         # Check configuration
         if not self.page_access_token:
             return self._create_error_response(
+                "ConfigurationError",
                 "MESSENGER_PAGE_ACCESS_TOKEN not set in .env file",
                 request_id=request_id
             )
         
         if not self.page_id:
             return self._create_error_response(
+                "ConfigurationError", 
                 "MESSENGER_PAGE_ID not set in .env file",
                 request_id=request_id
             )
@@ -80,7 +89,17 @@ class MessengerTool(Tool):
         operation = params.get("operation")
         if not operation:
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'operation'",
+                request_id=request_id
+            )
+        
+        # Check if operation is valid
+        valid_operations = ["send", "receive", "get_profile", "send_message", "list_conversations", "get_conversation", "get_user_profile", "health", "get_attachments"]
+        if operation not in valid_operations:
+            return self._create_error_response(
+                "ValidationError",
+                f"Unknown operation: '{operation}'. Valid operations: {', '.join(valid_operations)}",
                 request_id=request_id
             )
         
@@ -93,11 +112,14 @@ class MessengerTool(Tool):
             return self._get_conversation(params, request_id)
         elif operation == "get_user_profile":
             return self._get_user_profile(params, request_id)
+        elif operation == "get_attachments":
+            return self._get_attachments(params, request_id)
         elif operation == "health":
             return self._health_check(request_id)
         else:
             return self._create_error_response(
-                f"Unknown operation: '{operation}'. Valid operations: send_message, list_conversations, get_conversation, get_user_profile, health",
+                "ValidationError",
+                f"Unknown operation: '{operation}'. Valid operations: send_message, list_conversations, get_conversation, get_user_profile, get_attachments, health",
                 request_id=request_id
             )
     
@@ -208,7 +230,7 @@ class MessengerTool(Tool):
             params_dict = {
                 "access_token": self.page_access_token,
                 "limit": limit,
-                "fields": "id,created_time,from,to,message"
+                "fields": "id,created_time,from,to,message,attachments"  # Include attachments
             }
             
             response = requests.get(url, params=params_dict, timeout=10)
@@ -223,7 +245,8 @@ class MessengerTool(Tool):
                     "messages": messages,
                     "total_returned": len(messages),
                     "limit": limit,
-                    "paging": result.get("paging", {})
+                    "paging": result.get("paging", {}),
+                    "has_audio_attachments": self._check_audio_in_messages(messages)
                 },
                 request_id=request_id
             )
@@ -279,6 +302,75 @@ class MessengerTool(Tool):
                 request_id=request_id
             )
     
+    def _check_audio_in_messages(self, messages: List[Dict[str, Any]]) -> bool:
+        """Check if any messages contain audio attachments."""
+        for message in messages:
+            attachments = message.get("attachments", {}).get("data", [])
+            for attachment in attachments:
+                mime_type = attachment.get("mime_type", "")
+                if mime_type.startswith("audio/"):
+                    return True
+        return False
+    
+    def _get_attachments(self, params: Dict[str, Any], request_id: Optional[str]) -> ToolResponse:
+        """Get attachments from a specific message, with focus on audio files."""
+        message_id = params.get("message_id")
+        if not message_id:
+            return self._create_error_response(
+                "Missing required parameter: 'message_id'",
+                request_id=request_id
+            )
+        
+        try:
+            url = f"{self.base_url}/{message_id}/attachments"
+            params_dict = {
+                "access_token": self.page_access_token,
+                "fields": "name,mime_type,file_url,file_size,image_data"
+            }
+            
+            response = requests.get(url, params=params_dict, timeout=10)
+            response.raise_for_status()
+            
+            result = response.json()
+            attachments = result.get("data", [])
+            
+            # Filter for audio files
+            audio_files = []
+            for attachment in attachments:
+                mime_type = attachment.get("mime_type", "")
+                if mime_type.startswith("audio/"):
+                    audio_files.append({
+                        "name": attachment.get("name", "audio_file"),
+                        "mime_type": mime_type,
+                        "file_url": attachment.get("file_url"),
+                        "file_size": attachment.get("file_size"),
+                        "attachment_id": attachment.get("id")
+                    })
+            
+            return self._create_success_response(
+                result={
+                    "message_id": message_id,
+                    "total_attachments": len(attachments),
+                    "audio_files_count": len(audio_files),
+                    "attachments": attachments,
+                    "audio_files": audio_files
+                },
+                request_id=request_id
+            )
+            
+        except requests.exceptions.RequestException as e:
+            return self._create_error_response(
+                "APIError",
+                f"Failed to get attachments: {e}",
+                request_id=request_id
+            )
+        except Exception as e:
+            return self._create_error_response(
+                "UnexpectedError",
+                f"Unexpected error getting attachments: {e}",
+                request_id=request_id
+            )
+    
     def _health_check(self, request_id: Optional[str]) -> ToolResponse:
         """Check Messenger API health."""
         return self._create_success_response(
@@ -303,7 +395,8 @@ DESCRIPTION:
 OPERATIONS:
     send_message        - Send a message to a user
     list_conversations  - List page conversations
-    get_conversation    - Get conversation messages
+    get_conversation    - Get conversation messages (includes attachment info)
+    get_attachments     - Get attachments from a specific message (focus on audio)
     get_user_profile    - Get user profile information
     health             - Check API configuration
 
@@ -322,6 +415,9 @@ PARAMETERS:
         conversation_id (string, required) - Conversation ID to retrieve
         limit (integer, optional) - Number of messages to return (default: 20, max: 100)
 
+    For get_attachments:
+        message_id (string, required) - Message ID to get attachments from
+
     For get_user_profile:
         user_id (string, required) - User ID to get profile for
 
@@ -338,7 +434,10 @@ EXAMPLES:
     4. Get user profile:
        {"operation": "get_user_profile", "user_id": "123456789"}
 
-    5. Health check:
+    6. Get message attachments (includes audio URLs):
+       {"operation": "get_attachments", "message_id": "m_abc123"}
+
+    7. Health check:
        {"operation": "health"}
 
 CONFIGURATION:
@@ -372,6 +471,9 @@ NOTES:
     - Requires Facebook Page Access Token
     - Works with Facebook Pages API
     - Supports basic messaging operations
+    - NEW: Audio attachment support for voice messages  
     - Rate limiting handled by Facebook
-    - All responses now in structured JSON format
-"""
+    - Audio URLs provided via get_attachments for direct use with whisper_tool
+    - Supports common audio formats: MP3, MP4, WAV, OGG, WebM
+    - Integration ready with whisper_tool for transcription
+    - All responses now in structured JSON format"""

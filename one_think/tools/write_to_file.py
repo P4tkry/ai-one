@@ -47,6 +47,7 @@ class WriteToFile(Tool):
         path_str = params.get("path")
         if not path_str or not isinstance(path_str, str):
             return self._create_error_response(
+                "ValidationError",
                 "Missing or invalid parameter: 'path'",
                 request_id=request_id
             )
@@ -60,13 +61,15 @@ class WriteToFile(Tool):
         mode = params.get("mode", self.DEFAULT_MODE)
         if not isinstance(mode, str):
             return self._create_error_response(
+                "ValidationError",
                 "'mode' must be a string",
                 request_id=request_id
             )
-        
+
         mode = mode.strip().lower()
         if mode not in {"w", "a"}:
             return self._create_error_response(
+                "ValidationError",
                 "Invalid mode. Use 'w' (overwrite) or 'a' (append)",
                 request_id=request_id
             )
@@ -76,6 +79,7 @@ class WriteToFile(Tool):
         try:
             if path.exists() and path.is_dir():
                 return self._create_error_response(
+                    "ValidationError",
                     "Path points to a directory, not a file",
                     request_id=request_id
                 )
@@ -101,16 +105,19 @@ class WriteToFile(Tool):
         
         except PermissionError:
             return self._create_error_response(
+                "PermissionError",
                 "Permission denied",
                 request_id=request_id
             )
         except OSError as e:
             return self._create_error_response(
+                "FileSystemError",
                 f"File system error: {e}",
                 request_id=request_id
             )
         except Exception as e:
             return self._create_error_response(
+                "UnexpectedError",
                 f"Unexpected error: {e}",
                 request_id=request_id
             )

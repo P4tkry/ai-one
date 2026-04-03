@@ -55,6 +55,7 @@ class AIWebSearchTool(Tool):
         query = params.get("query")
         if not query or not isinstance(query, str):
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'query'",
                 request_id=request_id
             )
@@ -64,12 +65,14 @@ class AIWebSearchTool(Tool):
             max_results = int(params.get("max_results", self.DEFAULT_MAX_RESULTS))
         except (TypeError, ValueError):
             return self._create_error_response(
+                "ValidationError",
                 "'max_results' must be an integer",
                 request_id=request_id
             )
-        
+
         if max_results <= 0:
             return self._create_error_response(
+                "ValidationError",
                 "'max_results' must be greater than 0",
                 request_id=request_id
             )
@@ -78,6 +81,7 @@ class AIWebSearchTool(Tool):
         api_key = os.getenv("TAVILY_API_KEY")
         if not api_key:
             return self._create_error_response(
+                "ConfigurationError",
                 "TAVILY_API_KEY not set in .env file",
                 request_id=request_id
             )
@@ -125,11 +129,13 @@ class AIWebSearchTool(Tool):
             
         except requests.exceptions.RequestException as e:
             return self._create_error_response(
+                "NetworkError",
                 f"Request failed: {e}",
                 request_id=request_id
             )
         except Exception as e:
             return self._create_error_response(
+                "UnexpectedError",
                 f"Unexpected error: {e}",
                 request_id=request_id
             )

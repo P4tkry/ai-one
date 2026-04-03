@@ -67,16 +67,18 @@ class CredentialsTool(Tool):
         operation = params.get("operation")
         if not operation:
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'operation'",
                 request_id=request_id
             )
-        
+
         # Initialize encryption and database
         try:
             self._init_cipher()
             self._init_database()
         except Exception as e:
             return self._create_error_response(
+                "InitializationError",
                 f"Failed to initialize encryption/database: {e}",
                 request_id=request_id
             )
@@ -94,6 +96,7 @@ class CredentialsTool(Tool):
             return self._update_credential(params, request_id)
         else:
             return self._create_error_response(
+                "ValidationError",
                 f"Unknown operation: '{operation}'. Valid operations: store, retrieve, list, delete, update",
                 request_id=request_id
             )
@@ -155,6 +158,7 @@ class CredentialsTool(Tool):
         
         if not all([service_name, username, password]):
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameters: 'service_name', 'username', 'password'",
                 request_id=request_id
             )
@@ -200,11 +204,13 @@ class CredentialsTool(Tool):
             
         except json.JSONDecodeError:
             return self._create_error_response(
+                "ValidationError",
                 "Invalid JSON in metadata",
                 request_id=request_id
             )
         except Exception as e:
             return self._create_error_response(
+                "CredentialsError",
                 f"Error storing credential: {e}",
                 request_id=request_id
             )
@@ -228,6 +234,7 @@ class CredentialsTool(Tool):
             
             if not row:
                 return self._create_error_response(
+                    "NotFoundError",
                     f"No credentials found for service '{service_name}'",
                     request_id=request_id
                 )
@@ -262,6 +269,7 @@ class CredentialsTool(Tool):
             
         except Exception as e:
             return self._create_error_response(
+                "CredentialsError",
                 f"Error retrieving credential: {e}",
                 request_id=request_id
             )
@@ -299,6 +307,7 @@ class CredentialsTool(Tool):
             
         except Exception as e:
             return self._create_error_response(
+                "CredentialsError",
                 f"Error listing credentials: {e}",
                 request_id=request_id
             )
@@ -308,6 +317,7 @@ class CredentialsTool(Tool):
         service_name = params.get("service_name")
         if not service_name:
             return self._create_error_response(
+                "ValidationError",
                 "Missing required parameter: 'service_name'",
                 request_id=request_id
             )
@@ -321,6 +331,7 @@ class CredentialsTool(Tool):
                 
                 if cursor.rowcount == 0:
                     return self._create_error_response(
+                        "NotFoundError",
                         f"No credentials found for service '{service_name}'",
                         request_id=request_id
                     )
@@ -336,6 +347,7 @@ class CredentialsTool(Tool):
             
         except Exception as e:
             return self._create_error_response(
+                "CredentialsError",
                 f"Error deleting credential: {e}",
                 request_id=request_id
             )

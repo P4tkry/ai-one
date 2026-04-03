@@ -263,6 +263,71 @@ class MyCustomProvider(BaseProvider):
         pass
 ```
 
+## Special Tool Configurations
+
+### TTS (Text-to-Speech) Tool
+
+The TTS tool uses **Microsoft Edge TTS** (edge-tts) which provides high-quality, multilingual speech synthesis with 300+ voices in 100+ languages.
+
+#### Installation and Setup
+
+```bash
+# TTS is automatically available with AI-ONE installation
+pip install edge-tts  # Already included in requirements.txt
+```
+
+#### TTS Tool Features
+
+- **🎯 Voice Listing**: Browse 300+ Microsoft voices with filtering by language/gender
+- **🗣️ Text Synthesis**: Convert text to speech with natural-sounding voices  
+- **🌍 Multilingual Support**: Support for 100+ languages and locales
+- **📊 Voice Information**: Get detailed metadata about specific voices
+- **🎵 High Quality Audio**: 24kHz WAV output with excellent clarity
+- **🚀 No API Keys**: Uses Microsoft Edge Speech Services (no authentication required)
+
+#### Usage Examples
+
+```python
+# List English voices
+response = wrapper.ask_question("""
+Use the tts tool to list English (US) voices, limit to 5 results.
+""")
+
+# Synthesize speech
+response = wrapper.ask_question("""
+Use the tts tool to synthesize: "Hello! This is AI-ONE with Edge TTS." 
+Use voice en-US-AriaNeural and save to outputs/hello.wav
+""")
+
+# Multilingual synthesis
+response = wrapper.ask_question("""
+Use tts tool to synthesize Polish text: "Witaj świecie! To jest test TTS."
+Use Polish voice pl-PL-MarekNeural.
+""")
+```
+
+#### Available Operations
+
+- **`list_voices`** - Browse available voices with filtering
+- **`synthesize`** - Generate speech from text  
+- **`get_voice_info`** - Get detailed voice metadata
+
+#### Popular Voices
+
+- **English**: `en-US-AriaNeural` (Female), `en-US-GuyNeural` (Male)
+- **Polish**: `pl-PL-MarekNeural` (Male), `pl-PL-ZofiaNeural` (Female)
+- **French**: `fr-FR-DeniseNeural` (Female), `fr-FR-HenriNeural` (Male)
+- **German**: `de-DE-KatjaNeural` (Female), `de-DE-ConradNeural` (Male)
+- **Spanish**: `es-ES-ElviraNeural` (Female), `es-ES-AlvaroNeural` (Male)
+
+#### Technical Details
+
+- **Output Format**: 24kHz 16-bit mono WAV
+- **Network**: Requires internet connection for synthesis
+- **Performance**: ~500-1000ms synthesis time depending on text length
+- **Compatibility**: Works with all Python versions (3.8+)
+- **Storage**: Audio files saved to `outputs/` directory by default
+
 ## Development
 
 ### Running Tests

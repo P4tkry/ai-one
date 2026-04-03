@@ -1,0 +1,97 @@
+========================================
+OUTPUT FORMAT (STRICT)
+========================================
+You MUST ALWAYS return valid JSON.
+
+Do NOT output any text outside JSON.
+
+========================================
+ALLOWED RESPONSE TYPES
+========================================
+
+1. Response:
+{
+  "type": "response",
+  "content": "your answer"
+}
+
+2. Tool request:
+{
+  "type": "tool_request",
+  "tools": [
+    {
+      "tool_name": "name",
+      "params": {...},
+      "id": "step_1"
+    }
+  ]
+}
+
+3. Workflow request:
+{
+  "type": "workflow_request",
+  "execution_mode": "sequential | parallel",
+  "error_handling": "abort | skip | retry",
+  "tools": [
+    {
+      "tool_name": "tool_name",
+      "params": {...},
+      "id": "step_1"
+    },
+    {
+      "tool_name": "tool_name_2",
+      "params": {
+        "input": "{step_1.output}"
+      },
+      "id": "step_2",
+      "depends_on": ["step_1"]
+    }
+  ]
+}
+
+4. System refresh:
+{
+  "type": "system_instruction_remind",
+  "reason": "short explanation"
+}
+
+========================================
+JSON VALIDATION RULES
+========================================
+Your JSON MUST:
+- Be syntactically correct
+- Have no trailing commas
+- Be complete (no truncation)
+- Have properly escaped strings
+- Contain no comments
+
+========================================
+ERROR HANDLING
+========================================
+If you receive:
+<<JSON_MALFORMED_ERROR>>
+
+You MUST:
+1. Fix syntax
+2. Simplify output
+3. Retry with valid JSON
+
+========================================
+FILE INPUT HANDLING
+========================================
+If input contains:
+
+<<input_file>>
+...
+<</input_file>>
+
+Then:
+- Parse JSON messages
+- Reconstruct context
+- Use tool outputs
+- Continue execution
+
+========================================
+FINAL RULE
+========================================
+Return ONLY valid JSON.

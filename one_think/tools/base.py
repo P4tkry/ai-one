@@ -268,6 +268,44 @@ class Tool(ABC):
             execution_time_ms=elapsed_ms
         )
     
+    def _create_help_response(
+        self,
+        request_id: Optional[str] = None
+    ) -> ToolResponse:
+        """
+        Create help response with tool information.
+        
+        Args:
+            request_id: Optional request ID
+            
+        Returns:
+            ToolResponse with help information
+        """
+        help_info = {
+            "name": self.name,
+            "description": self.description,
+            "version": self.version,
+            "usage": f"Use {self.name} tool with appropriate parameters"
+        }
+        
+        # Add input schema information if available
+        if hasattr(self, 'Input') and self.Input is not None:
+            try:
+                schema = self.Input.model_json_schema()
+                help_info["input_schema"] = schema
+            except Exception:
+                pass
+                
+        return ToolResponse(
+            status="success",
+            tool=self.name,
+            request_id=request_id,
+            result={"help": help_info},
+            error=None,
+            execution_time_ms=0.0,
+            metadata={"type": "help_response"}
+        )
+
     def _create_success_response(
         self,
         result: dict[str, Any],

@@ -45,7 +45,7 @@ class PromptInstructionLoader:
         Load and render an instruction with variables.
         
         Args:
-            instruction_name: Name of instruction file (e.g., 'system_prompt.txt')
+            instruction_name: Name of instruction file (e.g., 'behaviour.txt', 'io_structure.txt')
             **variables: Variables to substitute in instruction
             
         Returns:
@@ -67,6 +67,7 @@ class PromptInstructionLoader:
     def get_system_prompt(self, tool_registry=None) -> str:
         """
         Get the main system prompt with tool information.
+        Combines 5-part modular prompts: identity + behaviour + execution_policy + tools_policy + io_contract
         
         Args:
             tool_registry: Optional tool registry for detailed tool info
@@ -77,14 +78,60 @@ class PromptInstructionLoader:
         try:
             # Generate formatted tools list
             if tool_registry:
-                available_tools = tool_registry.get_tools_formatted("detailed")
+                tools = tool_registry.list_tools()
+                tool_lines = []
+                for name in sorted(tools):
+                    metadata = tool_registry._metadata.get(name)
+                    if metadata:
+                        desc = metadata.description or 'No description'
+                    else:
+                        desc = 'No description available'
+                    tool_lines.append(f'{name} - {desc}')
+                available_tools = '\n'.join(tool_lines)
             else:
                 available_tools = ""
+            
+            # Load 5-part modular prompts
+            identity = self.load_instruction('01_identity.txt')
+            behaviour = self.load_instruction('02_behaviour.txt')
+            execution_policy = self.load_instruction('03_execution_policy.txt')
+            tools_policy = self.load_instruction('04_tools_policy.txt', available_tools=available_tools)
+            io_contract = self.load_instruction('05_io_contract.txt')
+            
+            # Combine all 5 parts
+            return f"{identity}\n\n{behaviour}\n\n{execution_policy}\n\n{tools_policy}\n\n{io_contract}"
                 
-            return self.load_instruction('system_prompt.txt', available_tools=available_tools)
-        except (FileNotFoundError, ValueError):
-            # Fallback to hardcoded prompt if instruction not available
+        except (FileNotFoundError, ValueError) as e:
+            # Fallback to hardcoded prompt if modular files not available
+            if tool_registry:
+                tools = tool_registry.list_tools()
+                tool_lines = []
+                for name in sorted(tools):
+                    metadata = tool_registry._metadata.get(name)
+                    if metadata:
+                        desc = metadata.description or 'No description'
+                    else:
+                        desc = 'No description available'
+                    tool_lines.append(f'{name} - {desc}')
+                available_tools = '\n'.join(tool_lines)
+            else:
+                available_tools = ""
+            
+            print(f"Warning: Could not load 5-part modular prompt files: {e}")
+            print("Falling back to hardcoded system prompt")
             return self._get_fallback_system_prompt(available_tools)
+    
+    def get_runtime_prompt(self) -> str:
+        """
+        Get the runtime prompt that should be added to every conversation.
+        
+        Returns:
+            Runtime prompt string or empty string if not available
+        """
+        try:
+            return self.load_instruction('runtime_prompt.txt')
+        except (FileNotFoundError, ValueError):
+            return ""
     
     def get_refresh_prompt(
         self, 

@@ -52,6 +52,9 @@ class Session:
         self.created_at: datetime = datetime.now(timezone.utc)
         self.metadata: Dict[str, Any] = metadata or {}
         
+        # System prompt tracking
+        self.system_prompt_sent: bool = False  # Track if system prompt was already sent
+        
         # Usage statistics
         self.stats = {
             "requests_count": 0,
@@ -116,6 +119,14 @@ class Session:
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Get session metadata."""
         return self.metadata.get(key, default)
+    
+    def mark_system_prompt_sent(self) -> None:
+        """Mark system prompt as sent to prevent re-sending."""
+        self.system_prompt_sent = True
+        
+    def reset_system_prompt(self) -> None:
+        """Reset system prompt flag (for system refresh requests)."""
+        self.system_prompt_sent = False
     
     def is_expired(self, max_idle_hours: float = 24.0) -> bool:
         """
