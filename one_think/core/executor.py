@@ -290,6 +290,15 @@ class Executor:
                     ToolRequest(tool_name=tc.tool_name, params=tc.params, id=tc.id)
                     for tc in parse_result.tools
                 ]
+
+                # UI fallback: render multi-tool tool_request as a workflow-like tree
+                started_tree = False
+                if self.progress_callback and len(tool_requests) > 1:
+                    self.progress_callback("Starting workflow", "workflow_start")
+                    started_tree = True
+                    for tr in tool_requests:
+                        step_label = tr.id or tr.tool_name
+                        self.progress_callback(f"Using tool: {step_label} ({tr.tool_name})", "tool")
                 
                 # Dispatch tools and continue loop
                 iteration_tool_results, iteration_errors = self._dispatch_tools(
@@ -297,6 +306,8 @@ class Executor:
                     session, 
                     execution_id
                 )
+                if started_tree and self.progress_callback:
+                    self.progress_callback("Workflow completed", "workflow_end")
                 tool_results.extend(iteration_tool_results)
                 errors.extend(iteration_errors)
                 
