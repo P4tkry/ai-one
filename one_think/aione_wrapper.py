@@ -138,10 +138,14 @@ class AiOneWrapper:
                 'created_at': session.created_at.isoformat()
             })
             
-            # Determine system prompt
-            final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
-            if progress_callback and not session.system_prompt_sent:
-                progress_callback("Loading system prompt", "system_prompt")
+            # Determine system prompt - only send once per session
+            if not session.system_prompt_sent:
+                final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
+                if progress_callback:
+                    progress_callback("Loading system prompt", "system_prompt")
+                session.system_prompt_sent = True  # Mark as sent
+            else:
+                final_system_prompt = None  # Don't send system prompt again
                 
             debug_component('wrapper', 'SYSTEM_PROMPT', {
                 'custom_provided': system_prompt is not None,
@@ -251,8 +255,12 @@ class AiOneWrapper:
                 'created_at': session.created_at.isoformat()
             })
             
-            # Determine system prompt
-            final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
+            # Determine system prompt - only send once per session
+            if not session.system_prompt_sent:
+                final_system_prompt = system_prompt or self.config.system_prompt or self._get_default_system_prompt()
+                session.system_prompt_sent = True  # Mark as sent
+            else:
+                final_system_prompt = None  # Don't send system prompt again
             debug_component('wrapper', 'SYSTEM_PROMPT', {
                 'custom_provided': system_prompt is not None,
                 'config_provided': self.config.system_prompt is not None,
