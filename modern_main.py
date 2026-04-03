@@ -118,6 +118,7 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
     
     # Beautiful header with rich styling
     console.print("\n🚀 [bold cyan]AI-ONE Modern Interface[/bold cyan]")
+    print("DEBUG: Rich header printed")  # Debug line
     console.print("=" * 50, style="cyan")
     console.print(f"[green]Model:[/green] {wrapper.config.model}")
     console.print(f"[green]Tools:[/green] {'Enabled' if wrapper.config.enable_tools else 'Disabled'}")
@@ -138,9 +139,11 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
     try:
         while True:
             if session_id:
-                user_input = console.input(f"[blue][{session_id[:8]}...] You:[/blue] ")
+                console.print(f"[blue][{session_id[:8]}...] You:[/blue] ", end="")
+                user_input = input()
             else:
-                user_input = console.input("[blue]👤 You:[/blue] ")
+                console.print("[blue]👤 You:[/blue] ", end="")
+                user_input = input()
             
             if not user_input.strip():
                 continue
@@ -216,9 +219,15 @@ def run_modern_interface(config: Optional[AiOneConfig] = None):
                 # Start with initial status
                 git_display.add_step("📝 Analyzing request", "start")
                 
-                session_id, response = wrapper.ask_question_with_git_style(
-                    user_input, session_id, progress_callback
-                )
+                # Check if git-style method exists (backward compatibility)
+                if hasattr(wrapper, 'ask_question_with_git_style'):
+                    session_id, response = wrapper.ask_question_with_git_style(
+                        user_input, session_id, progress_callback
+                    )
+                else:
+                    # Fallback to regular method
+                    session_id, response = wrapper.ask_question(user_input, session_id)
+                    git_display.complete_final()
                 
                 git_display.cleanup()
                 console.print(f"\n🤖 [bold green]AI:[/bold green] {response}")
