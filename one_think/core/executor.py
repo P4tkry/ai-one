@@ -11,6 +11,7 @@ Architecture:
 import json
 import json
 import logging
+import time
 import traceback
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union, Callable
@@ -523,9 +524,25 @@ class Executor:
         Raises:
             ToolDispatchError: If tool execution fails
         """
+        start_time = time.time()
+        
         try:
             # Create tool instance
             tool_instance = self.tool_registry.create_tool_instance(tool_request.tool_name)
+            
+            # Handle help request
+            if tool_request.params.get('help') is True:
+                help_text = tool_instance.get_help()
+                execution_time = (time.time() - start_time) * 1000
+                
+                return ToolResponse(
+                    status="success",
+                    tool=tool_request.tool_name,
+                    request_id=request_id,
+                    result={"help": help_text},
+                    error=None,
+                    execution_time_ms=execution_time
+                )
             
             # Execute tool with parameters
             result = tool_instance.execute_json(
@@ -536,6 +553,8 @@ class Executor:
             return result
             
         except Exception as e:
+            execution_time = (time.time() - start_time) * 1000
+            
             # Create error response
             error_response = ToolResponse(
                 status="error",
@@ -547,7 +566,7 @@ class Executor:
                 },
                 tool=tool_request.tool_name,
                 request_id=request_id,
-                execution_time_ms=0
+                execution_time_ms=execution_time
             )
             
             return error_response
