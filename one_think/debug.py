@@ -133,9 +133,11 @@ class ColoredDebugLogger:
         formatted_messages = []
         for msg in messages:  # All messages - no truncation
             if hasattr(msg, '__dict__'):
-                # Object with attributes
+                # Object with attributes (Message or ProviderMessage)
+                # Try 'type' first (Message), then 'role' (ProviderMessage)
+                msg_type = getattr(msg, 'type', getattr(msg, 'role', 'unknown'))
                 formatted_messages.append({
-                    'type': getattr(msg, 'type', 'unknown'),
+                    'type': msg_type,
                     'content': str(getattr(msg, 'content', ''))
                 })
             elif isinstance(msg, dict):

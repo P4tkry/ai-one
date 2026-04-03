@@ -326,13 +326,13 @@ class Executor:
         Call LLM provider with current request and session context.
         
         With Copilot CLI integration and JSON format:
-        - Build messages array including system prompt, user input, and tool results
+        - Build messages array including system prompt, runtime prompt, user input, and tool results
         - Send as JSON to Copilot CLI which manages session continuity via --resume
         
         Args:
             session: Session for statistics and session_id 
             user_input: Current user prompt
-            system_prompt: Optional system prompt override
+            system_prompt: Optional system prompt override (sent only once per session)
             tool_results: Tool results from previous iterations to include in context
             
         Returns:
@@ -348,9 +348,17 @@ class Executor:
             # Create current message set with JSON structure
             messages = []
             
-            # Add system prompt if provided
+            # Add system prompt if provided (only on first request)
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
+            
+            # Add runtime prompt (persistent directive added to EVERY request)
+            runtime_prompt = self._get_runtime_prompt()
+            if runtime_prompt:
+                messages.append({"role": "user", "content": runtime_prompt})
+                debug_component('executor', 'RUNTIME_PROMPT_ADDED', {
+                    'length': len(runtime_prompt)
+                })
             
             # Add current user input
             messages.append({"role": "user", "content": user_input})
@@ -595,6 +603,25 @@ class Executor:
         
         # Load from instruction with detailed tool descriptions
         return instruction_loader.get_system_prompt(tool_registry=self.tool_registry)
+    
+    def _get_runtime_prompt(self) -> str:
+        """
+        Get runtime prompt that is added to EVERY request.
+        
+        Runtime prompt is a persistent directive that reminds the LLM of key rules
+        and behaviors on every iteration, ensuring consistent behavior throughout
+        the conversation.
+        
+        Returns:
+            Runtime prompt string or empty string if not available
+        """
+        from ..templates import instruction_loader
+        
+        try:
+            return instruction_loader.get_runtime_prompt()
+        except Exception as e:
+            logger.warning(f"Failed to load runtime prompt: {e}")
+            return ""
     
     
     def set_llm_provider(self, provider: Union[Callable, 'LLMProvider']):
