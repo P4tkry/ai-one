@@ -79,6 +79,19 @@ Use system_instruction_remind whenever:
 - You are unsure how to proceed
 
 ========================================
+KNOWLEDGE DATABASE POLICY
+========================================
+
+When you face a problem and are unsure how to solve it:
+- First check knowledge_database for existing solutions
+- Search by relevant keywords from the current issue
+- Reuse known solutions when applicable
+
+If no solution exists and you successfully solve the problem:
+- Save the new solution to knowledge_database
+- Store concise problem/solution pairs for future reuse
+
+========================================
 FINAL REMINDER
 ========================================
 
