@@ -944,9 +944,12 @@ OPERATIONS:
     authenticate     - Authenticate with Google APIs (required first step)
     gmail_send      - Send Gmail message
     gmail_list      - List Gmail messages
+    gmail_read      - Read full Gmail message content
     calendar_list   - List Calendar events
     calendar_create - Create Calendar event
     tasks_list      - List Google Tasks
+    tasks_create    - Create Google Task
+    tasks_complete  - Mark Google Task as completed
     status          - Check connection status
 
 GMAIL OPERATIONS:
@@ -958,6 +961,11 @@ GMAIL OPERATIONS:
     gmail_list:
         Optional: query, max_results (default: 10)
         Example: {"operation": "gmail_list", "query": "from:important@company.com", "max_results": 5}
+
+    gmail_read:
+        Required: message_id
+        Example: {"operation": "gmail_read", "message_id": "18fabc123def4567"}
+        Returns: full headers + decoded body (when available)
 
 CALENDAR OPERATIONS:
     calendar_list:
