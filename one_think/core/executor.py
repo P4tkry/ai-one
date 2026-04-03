@@ -327,12 +327,12 @@ class Executor:
                 })
                 
             elif parse_result.type == ResponseType.SYSTEM_REFRESH_REQUEST:
-                # Handle system refresh request
-                self._handle_system_refresh(parse_result, session)
+                # Handle system refresh request and inject refreshed prompt next iteration
+                system_prompt = self._handle_system_refresh(parse_result, session)
 
             elif parse_result.type == ResponseType.SYSTEM_INSTRUCTION_REMIND:
                 # Handle system instruction reminder request as refresh
-                self._handle_system_refresh(parse_result, session)
+                system_prompt = self._handle_system_refresh(parse_result, session)
                 
             elif parse_result.type == ResponseType.RESPONSE:
                 # Text response - we're done
@@ -575,7 +575,7 @@ class Executor:
             
             return error_response
     
-    def _handle_system_refresh(self, refresh_request: SystemRefreshRequest, session: Session):
+    def _handle_system_refresh(self, refresh_request: SystemRefreshRequest, session: Session) -> str:
         """
         Handle system prompt refresh request.
         
@@ -595,13 +595,6 @@ class Executor:
         # Build refreshed system prompt with current state
         refreshed_prompt = self._build_refreshed_system_prompt(session, reason)
         
-        # Inject system message into conversation
-        system_message = SystemMessage(
-            content=refreshed_prompt,
-            timestamp=datetime.now(timezone.utc)
-        )
-        session.add_message(system_message)
-        
         # Record refresh in session metadata with timestamp
         refresh_count = session.get_metadata("system_refresh_count", 0) + 1
         session.set_metadata("system_refresh_count", refresh_count)
@@ -617,6 +610,7 @@ class Executor:
         })
         
         logger.info(f"System refresh completed (#{refresh_count}): {len(refreshed_prompt)} chars")
+        return refreshed_prompt
     
     def _build_refreshed_system_prompt(self, session: Session, reason: str) -> str:
         """
@@ -634,9 +628,9 @@ class Executor:
         # Get base prompt
         base_prompt = self._get_base_system_prompt()
         
-        # Add session context summary
-        message_count = len(session.messages) if session.messages else 0
-        tool_count = session.stats.get('tool_calls', 0)
+        # Add session context summary (session does not store message history)
+        message_count = session.stats.get('requests_count', 0)
+        tool_count = session.stats.get('tool_calls_count', 0)
         
         # Build tools summary  
         tools_summary = self.tool_registry.get_tools_formatted("detailed") if self.tool_registry else "No tools available"
